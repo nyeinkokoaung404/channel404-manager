@@ -59,7 +59,7 @@ ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
 DESEC_TOKEN="V55cFY8zTictLCPfviiuX5DHjs15"
-DESEC_DOMAIN="manager.firewallfalcon.qzz.io"
+DESEC_DOMAIN="manager.nkka404.qzz.io"
 
 SELECTED_USER=""
 UNINSTALL_MODE="interactive"

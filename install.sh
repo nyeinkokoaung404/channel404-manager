@@ -17,7 +17,7 @@ SSHD_URL="https://raw.githubusercontent.com/nyeinkokoaung404/channel404-manager/
 wget -4 -q -O /usr/local/bin/menu "$MENU_URL"
 chmod +x /usr/local/bin/menu
 
-echo "Applying FirewallFalcon SSH configuration..."
+echo "Applying Channel404 SSH configuration..."
 
 SSHD_CONFIG="/etc/ssh/sshd_config"
 BACKUP="/etc/ssh/sshd_config.backup.$(date +%F-%H%M%S)"

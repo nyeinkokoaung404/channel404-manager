@@ -84,7 +84,7 @@ check_environment() {
 }
 
 initial_setup() {
-    echo -e "${C_BLUE}⚙️ Initializing FirewallFalcon Manager setup...${C_RESET}"
+    echo -e "${C_BLUE}⚙️ Initializing Channel404 Manager setup...${C_RESET}"
     check_environment
     
     mkdir -p "$DB_DIR"

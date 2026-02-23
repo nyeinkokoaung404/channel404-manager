@@ -1512,7 +1512,7 @@ uninstall_dnstt() {
 
 install_falcon_proxy() {
     clear; show_banner
-    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Falcon Proxy (Websockets/Socks) ---${C_RESET}"
+    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Proxy (Websockets/Socks) ---${C_RESET}"
     
     if [ -f "$FALCONPROXY_SERVICE_FILE" ]; then
         echo -e "\n${C_YELLOW}ℹ️ Falcon Proxy is already installed.${C_RESET}"
@@ -1526,7 +1526,7 @@ install_falcon_proxy() {
     fi
 
     echo -e "\n${C_BLUE}🌐 Fetching available versions from GitHub...${C_RESET}"
-    local releases_json=$(curl -s "https://api.github.com/repos/firewallfalcons/FirewallFalcon-Manager/releases")
+    local releases_json=$(curl -s "https://api.github.com/repos/nyeinkokoaung404/channel404-manager/releases")
     if [[ -z "$releases_json" || "$releases_json" == "[]" ]]; then
         echo -e "${C_RED}❌ Error: Could not fetch releases. Check internet or API limits.${C_RESET}"
         return
@@ -1588,7 +1588,7 @@ install_falcon_proxy() {
     fi
     
     # Construct download URL based on selected version
-    local download_url="https://github.com/firewallfalcons/FirewallFalcon-Manager/releases/download/$SELECTED_VERSION/$binary_name"
+    local download_url="https://github.com/nyeinkokoaung404/channel404-manager/releases/download/$SELECTED_VERSION/$binary_name"
 
     echo -e "\n${C_GREEN}📥 Downloading Falcon Proxy $SELECTED_VERSION ($binary_name)...${C_RESET}"
     wget -q --show-progress -O "$FALCONPROXY_BINARY" "$download_url"
@@ -2294,8 +2294,8 @@ protocol_menu() {
         printf "     ${C_CHOICE}[ 6]${C_RESET} %-45s\n" "🗑️ Uninstall SSL Tunnel"
         printf "     ${C_CHOICE}[ 7]${C_RESET} %-45s %s\n" "📡 Install/View DNSTT (Port 53)" "$dnstt_status"
         printf "     ${C_CHOICE}[ 8]${C_RESET} %-45s\n" "🗑️ Uninstall DNSTT"
-        printf "     ${C_CHOICE}[ 9]${C_RESET} %-45s %s\n" "🦅 Install Falcon Proxy (Select Version)" "$falconproxy_status"
-        printf "     ${C_CHOICE}[10]${C_RESET} %-45s\n" "🗑️ Uninstall Falcon Proxy"
+        printf "     ${C_CHOICE}[ 9]${C_RESET} %-45s %s\n" "🦅 Install Websocket/Proxy (Select Version)" "$falconproxy_status"
+        printf "     ${C_CHOICE}[10]${C_RESET} %-45s\n" "🗑️ Uninstall Websocket/Proxy"
         printf "     ${C_CHOICE}[11]${C_RESET} %-45s %s\n" "🌐 Install/Manage Nginx Proxy (80/443)" "$nginx_status"
         printf "     ${C_CHOICE}[16]${C_RESET} %-45s %s\n" "🛡️ Install ZiVPN (UDP 5667)" "$zivpn_status"
         printf "     ${C_CHOICE}[17]${C_RESET} %-45s\n" "🗑️ Uninstall ZiVPN"
@@ -2834,12 +2834,12 @@ main_menu() {
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "4" "Lock User Account" "8" "Generate Client Config"
         
         echo
-        echo -e "   ${C_TITLE}════════════[ ${C_BOLD}🌐 VPN & PROTOCOLS ${C_RESET}${C_TITLE}]═════════════${C_RESET}"
+        echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}🌐 VPN & PROTOCOLS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "9" "Protocol Manager" "11" "Traffic Monitor (Lite)"
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "10" "DT Proxy Manager" "12" "Block Torrent (Anti-P2P)"
 
         echo
-        echo -e "   ${C_TITLE}════════════[ ${C_BOLD}⚙️ SYSTEM SETTINGS ${C_RESET}${C_TITLE}]═════════════${C_RESET}"
+        echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}⚙️ SYSTEM SETTINGS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "13" "CloudFlare Free Domain" "16" "Backup User Data"
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "14" "SSH Banner Config" "17" "Restore User Data"
         printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "15" "Auto-Reboot Task" "18" "Cleanup Expired Users"

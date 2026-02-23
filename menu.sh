@@ -472,6 +472,7 @@ create_user() {
     read -p "🗓️ Enter account duration (in days): " days
     if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     read -p "📶 Enter simultaneous connection limit: " limit
+    export limit=$limit
     if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     echo -e "Debug: limit value entered = ${C_YELLOW}$limit${C_RESET}"
     sleep 2
@@ -485,8 +486,7 @@ create_user() {
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
     echo -e "  - 🗓️ Expires on:       ${C_YELLOW}$expire_date${C_RESET}"
-   # echo -e "  - 📶 Connection Limit:  ${C_YELLOW}'$limit'${C_RESET}"
-    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}${limit}${C_RESET}"
+    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$limit${C_RESET}"
     echo -e "    ${C_DIM}(Active monitoring service will enforce this limit)${C_RESET}"
 
     # Auto-ask for config generation

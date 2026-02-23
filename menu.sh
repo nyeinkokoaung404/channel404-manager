@@ -417,7 +417,7 @@ _select_user_interface() {
     for i in "${!users[@]}"; do
         printf "  ${C_GREEN}[%2d]${C_RESET} %s\n" "$((i+1))" "${users[$i]}"
     done
-    echo -e "\n  ${C_RED} [ 0]${C_RESET} ↩️ Cancel and return to main menu"
+    echo -e "\n  ${C_RED}[ 0]${C_RESET} ↩️ Cancel and return to main menu"
     echo
     local choice
     while true; do

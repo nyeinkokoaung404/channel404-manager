@@ -2850,7 +2850,7 @@ main_menu() {
         echo
         read -p "$(echo -e ${C_PROMPT}"👉 Select an option: "${C_RESET})" choice
         case $choice in
-            1) create_user; press_enter ;;
+            1) create_user ;;
             2) delete_user; press_enter ;;
             3) renew_user; press_enter ;;
             4) lock_user; press_enter ;;

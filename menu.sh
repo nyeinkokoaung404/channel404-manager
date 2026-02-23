@@ -485,7 +485,7 @@ create_user() {
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
     echo -e "  - 🗓️ Expires on:       ${C_YELLOW}$expire_date${C_RESET}"
-    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$limit${C_RESET}"
+    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}'$limit'${C_RESET}"
     echo -e "    ${C_DIM}(Active monitoring service will enforce this limit)${C_RESET}"
 
     # Auto-ask for config generation

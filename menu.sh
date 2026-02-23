@@ -473,8 +473,6 @@ create_user() {
     if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     read -p "📶 Enter simultaneous connection limit: " limit
     if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
-    echo -e "Debug: limit value entered = ${C_YELLOW}$limit${C_RESET} ✅"
-    sleep 2
     local expire_date
     expire_date=$(date -d "+$days days" +%Y-%m-%d)
     user_limit=$limit

@@ -2243,7 +2243,7 @@ show_banner() {
     echo -e "${C_TITLE}  | |___|  _  |/ ___ \| |\  | |\  | |___| |___  |__   _| |_| |__   _|${C_RESET}"
     echo -e "${C_TITLE}   \____|_| |_/_/   \_\_| \_|_| \_|_____|_____|    |_|  \___/   |_|  ${C_RESET}"
     echo -e "${C_GRAY}   ------------------------------------------------------------------${C_RESET}"
-    echo -e "${C_CYAN}                 PREMIUM SSH & VPN SERVICES${C_RESET}"
+    echo -e "${C_CYAN}                 PREMIUM SSH & VPN SERVICES${C_RESET}${C_DIM}| v3.5.0${C_RESET}"
     echo -e "${C_YELLOW}            Developed by: 404\2.0 <🇲🇲/> (@nkka404)${C_RESET}"
     echo -e "${C_GRAY}   ------------------------------------------------------------------${C_RESET}"
     echo

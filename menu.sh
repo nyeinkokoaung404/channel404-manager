@@ -473,6 +473,8 @@ create_user() {
     if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     read -p "📶 Enter simultaneous connection limit: " limit
     if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    echo -e "${C_YELLOW}Debug: limit value entered = '$limit'${C_RESET}"
+    sleep 2
     local expire_date
     expire_date=$(date -d "+$days days" +%Y-%m-%d)
     useradd -m -s /usr/sbin/nologin "$username"; echo "$username:$password" | chpasswd; chage -E "$expire_date" "$username"
@@ -483,7 +485,6 @@ create_user() {
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
     echo -e "  - 🗓️ Expires on:       ${C_YELLOW}$expire_date${C_RESET}"
-    echo "Debug - limit value: '$limit'"
     echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$limit${C_RESET}"
     echo -e "    ${C_DIM}(Active monitoring service will enforce this limit)${C_RESET}"
 

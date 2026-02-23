@@ -2511,7 +2511,7 @@ generate_client_config() {
     echo -e "\n🔹 ${C_BOLD}SSH Direct${C_RESET}:"
     echo -e "   • Host: $host_domain"
     echo -e "   • Port: 22"
-    echo -e "   • payload: (Standard SSH)"
+    echo -e "   • Payload: (Standard SSH)"
 
     # 2. SSL/TLS Tunnel (HAProxy or Nginx)
     local ssl_port=""

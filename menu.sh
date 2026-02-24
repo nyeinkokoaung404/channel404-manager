@@ -127,7 +127,7 @@ verify_license() {
         exit 1
     fi
 
-    echo -e "${C_GREEN}✅ License Verified! Valid until: $expiry_date${C_RESET}"
+    echo -e "${C_GREEN}✅ License Verified! Valid until: $LICENSE_EXPIRE${C_RESET}"
     sleep 1
 }
 

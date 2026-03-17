@@ -26,8 +26,10 @@ C_STATUS_A=$C_GREEN
 C_STATUS_I=$C_GRAY
 C_ACCENT=$C_ORANGE
 
+DB_URL="https://raw.githubusercontent.com/nyeinkokoaung404/channel404-manager/main/database.sh"
 DB_DIR="/etc/firewallfalcon"
 DB_FILE="$DB_DIR/users.db"
+LICENSE_KEY_FILE="$DB_DIR/.key"
 INSTALL_FLAG_FILE="$DB_DIR/.install"
 BADVPN_SERVICE_FILE="/etc/systemd/system/badvpn.service"
 BADVPN_BUILD_DIR="/root/badvpn-build"
@@ -64,16 +66,81 @@ ZIVPN_CONFIG_FILE="$ZIVPN_DIR/config.json"
 ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
-DESEC_TOKEN="V55cFY8zTictLCPfviiuX5DHjs15"
-DESEC_DOMAIN="manager.firewallfalcon.qzz.io"
+DESEC_TOKEN="7g7Hnzqtyda2xUqNUwfEhpysJAPv"
+DESEC_DOMAIN="channel404.dedyn.io"
 
 SELECTED_USER=""
 UNINSTALL_MODE="interactive"
+LICENSE_EXPIRE="Unknown"
+
+verify_license() {
+    mkdir -p "$DB_DIR"
+    local vps_ip=$(wget -4 -qO- http://checkip.amazonaws.com || curl -s4 icanhazip.com)
+    
+    if [[ -z "$vps_ip" ]]; then
+        echo -e "${C_RED}❌ Error: Internet connection required for license check.${C_RESET}"
+        exit 1
+    fi
+
+    # Key မရှိလျှင် တောင်းရန်
+    if [ ! -f "$LICENSE_KEY_FILE" ]; then
+        clear
+        echo -e "${C_CYAN}------------------------------------------${C_RESET}"
+        echo -e "  ${C_BOLD}CHANNEL404 MANAGER - ACTIVATION${C_RESET}"
+        echo -e "${C_CYAN}------------------------------------------${C_RESET}"
+        echo -e "${C_WHITE}Contact @nkka404 to get your Serial Key.${C_RESET}"
+        read -p "🔑 Enter Serial Key: " user_key
+        echo "$user_key" > "$LICENSE_KEY_FILE"
+    fi
+
+    local saved_key=$(cat "$LICENSE_KEY_FILE")
+    local db_data=$(wget -4 -qO- "$DB_URL" 2>/dev/null)
+    
+    if [[ -z "$db_data" ]]; then
+        echo -e "${C_RED}❌ Error: License server is unreachable.${C_RESET}"
+        exit 1
+    fi
+
+    local key_info=$(echo "$db_data" | grep "^$saved_key|")
+
+    if [[ -z "$key_info" ]]; then
+        echo -e "${C_RED}❌ Invalid Serial Key! Contact @nkka404.${C_RESET}"
+        rm -f "$LICENSE_KEY_FILE"
+        exit 1
+    fi
+
+    LICENSE_EXPIRE=$(echo "$key_info" | cut -d'|' -f2)
+    local allowed_ip=$(echo "$key_info" | cut -d'|' -f3)
+    local current_ts=$(date +%s)
+    local expiry_ts=$(date -d "$LICENSE_EXPIRE" +%s 2>/dev/null || echo 0)
+
+    # Hard Expiry Lock
+    if [[ $current_ts -gt $expiry_ts ]]; then
+        clear
+        echo -e "${C_RED}###########################################${C_RESET}"
+        echo -e "${C_RED}❌ YOUR LICENSE EXPIRED ON: $LICENSE_EXPIRE${C_RESET}"
+        echo -e "${C_RED}❌ ACCESS DENIED. CONTACT @nkka404.${C_RESET}"
+        echo -e "${C_RED}###########################################${C_RESET}"
+        exit 1
+    fi
+
+    # IP Lock check
+    if [[ "$allowed_ip" != "ANY" ]] && [[ "$allowed_ip" != "$vps_ip" ]]; then
+        echo -e "${C_RED}❌ Access Denied: Key locked to another IP ($allowed_ip).${C_RESET}"
+        exit 1
+    fi
+
+    echo -e "${C_GREEN}✅ License Verified! Valid until: $LICENSE_EXPIRE${C_RESET}"
+    sleep 1
+}
 
 if [[ $EUID -ne 0 ]]; then
    echo -e "${C_RED}❌ Error: This script requires root privileges to run.${C_RESET}"
    exit 1
 fi
+
+# Run Security Check
+verify_license
 
 # Mandatory Dependency Check (Added jq and curl)
 check_environment() {

@@ -2541,7 +2541,17 @@ show_banner() {
     
     clear
     echo
-    echo -e "${C_TITLE}   FirewallFalcon Manager ${C_RESET}${C_DIM}| v4.0.0 Premium Edition${C_RESET}"
+    echo -e "${C_GRAY}   ------------------------------------------------------------------${C_RESET}"
+    echo -e "${C_TITLE}    ____ _   _    _    _   _ _   _ _____ _       _  _    ___  _  _   ${C_RESET}"
+    echo -e "${C_TITLE}   / ___| | | |  / \  | \ | | \ | | ____| |     | || |  / _ \| || |  ${C_RESET}"
+    echo -e "${C_TITLE}  | |   | |_| | / _ \ |  \| |  \| |  _| | |     | || |_| | | | || |_ ${C_RESET}"
+    echo -e "${C_TITLE}  | |___|  _  |/ ___ \| |\  | |\  | |___| |___  |__   _| |_| |__   _|${C_RESET}"
+    echo -e "${C_TITLE}   \____|_| |_/_/   \_\_| \_|_| \_|_____|_____|    |_|  \___/   |_|  ${C_RESET}"
+    echo -e "${C_GRAY}   ------------------------------------------------------------------${C_RESET}"
+    echo -e "${C_CYAN}                 PREMIUM SSH & VPN SERVICES${C_RESET}"
+    echo -e "${C_YELLOW}            Developed by: 404\2.0 <🇲🇲/> (@nkka404)${C_RESET}"
+    echo -e "${C_GRAY}   ------------------------------------------------------------------${C_RESET}"
+    echo -e "   ${C_ACCENT}System License Expiry : ${C_WHITE}${LICENSE_EXPIRE}${C_RESET} ${C_GREEN}(Verified)${C_RESET}"
     echo -e "${C_BLUE}   ─────────────────────────────────────────────────────────${C_RESET}"
     printf "   ${C_GRAY}%-10s${C_RESET} %-20s ${C_GRAY}|${C_RESET} %s\n" "OS" "$os_name" "Uptime: $up_time"
     printf "   ${C_GRAY}%-10s${C_RESET} %-20s ${C_GRAY}|${C_RESET} %s\n" "Memory" "${ram_usage}% Used" "Online Sessions: ${C_WHITE}${online_users}${C_RESET}"

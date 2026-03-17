@@ -788,7 +788,7 @@ create_user() {
     echo -e "${C_GREEN}✅ User '$username' created successfully!${C_RESET}\n"
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
-    echo -e "  - 🗓️ Expires on:        ${C_YELLOW}$expire_date${C_RESET}"
+    echo -e "  - 🗓️ Expires on:         ${C_YELLOW}$expire_date${C_RESET}"
     echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$user_limit${C_RESET}"
     echo -e "  - 📦 Bandwidth Limit:   ${C_YELLOW}$bw_display${C_RESET}"
     echo -e "    ${C_DIM}(Active monitoring service will enforce these limits)${C_RESET}"

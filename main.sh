@@ -775,6 +775,7 @@ create_user() {
     if ! [[ "$bandwidth_gb" =~ ^[0-9]+\.?[0-9]*$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     local expire_date
     expire_date=$(date -d "+$days days" +%Y-%m-%d)
+    user_limit=$limit
     useradd -m -s /usr/sbin/nologin "$username"
     usermod -aG ffusers "$username" 2>/dev/null
     echo "$username:$password" | chpasswd; chage -E "$expire_date" "$username"
@@ -788,7 +789,7 @@ create_user() {
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
     echo -e "  - 🗓️ Expires on:        ${C_YELLOW}$expire_date${C_RESET}"
-    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$limit${C_RESET}"
+    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$user_limit${C_RESET}"
     echo -e "  - 📦 Bandwidth Limit:   ${C_YELLOW}$bw_display${C_RESET}"
     echo -e "    ${C_DIM}(Active monitoring service will enforce these limits)${C_RESET}"
 

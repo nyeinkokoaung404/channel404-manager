@@ -1259,7 +1259,7 @@ set_ssh_banner_paste() {
     echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
 }
 
-*/set_ssh_banner_paste() {
+/*set_ssh_banner_paste() {
     clear; show_banner
     echo -e "${C_BOLD}${C_PURPLE}--- 📋 Paste SSH Banner ---${C_RESET}"
     echo -e "Paste your banner code below. Press ${C_YELLOW}[Ctrl+D]${C_RESET} when you are finished."
@@ -1272,7 +1272,7 @@ set_ssh_banner_paste() {
     _enable_banner_in_sshd_config
     _restart_ssh
     echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
-}/*
+}*/
 
 view_ssh_banner() {
     clear; show_banner
@@ -1311,6 +1311,82 @@ remove_ssh_banner() {
 
 ssh_banner_menu() {
     while true; do
+        clear; show_banner
+        
+        # Dynamic Banner Status
+        local dynamic_status="${C_STATUS_I}(Disabled)${C_RESET}"
+        if [[ -f "/etc/firewallfalcon/banners_enabled" ]]; then
+            dynamic_status="${C_STATUS_A}(Enabled)${C_RESET}"
+        fi
+
+        # Manual Banner Status (sshd_config ထဲမှာ Banner line ရှိမရှိစစ်ခြင်း)
+        local manual_status="${C_STATUS_I}(Disabled)${C_RESET}"
+        if grep -q -E "^\s*Banner\s+$SSH_BANNER_FILE" /etc/ssh/sshd_config && [ -f "$SSH_BANNER_FILE" ]; then
+            manual_status="${C_STATUS_A}(Enabled)${C_RESET}"
+        fi
+        
+        echo -e "\n   ${C_TITLE}═══════════════[ ${C_BOLD}🎨 SSH BANNER MANAGEMENT ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
+        
+        # Display Dynamic Banner Options
+        printf "     ${C_CHOICE}[ 1]${C_RESET} %-40s %s\n" "✅ Enable Dynamic Login Banner" "$dynamic_status"
+        printf "     ${C_CHOICE}[ 2]${C_RESET} %-40s\n" "❌ Disable Dynamic Login Banner"
+        
+        echo -e "     ${C_DIM}-----------------------------------------------------${C_RESET}"
+        
+        # Display Manual Banner Options
+        printf "     ${C_CHOICE}[ 3]${C_RESET} %-40s %s\n" "📋 Set/Edit Manual Paste Banner" "$manual_status"
+        printf "     ${C_CHOICE}[ 4]${C_RESET} %-40s\n" "👁️  View Manual Banner"
+        printf "     ${C_DANGER}[ 5]${C_RESET} %-40s\n" "🗑️  Remove Manual Banner"
+        
+        echo -e "     ${C_DIM}-----------------------------------------------------${C_RESET}"
+        printf "     ${C_CHOICE}[ 6]${C_RESET} %-40s\n" "📝 Preview Dynamic Banner (per user)"
+
+        echo -e "   ${C_DIM}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${C_RESET}"
+        echo -e "     ${C_WARN}[ 0]${C_RESET} ↩️ Return to Main Menu"
+        echo
+        read -p "$(echo -e ${C_PROMPT}"👉 Select an option: "${C_RESET})" choice
+        case $choice in
+            1)
+                # Dynamic ဖွင့်ရင် Manual ကို ပိတ်ပစ်ခြင်း (Optional safety)
+                rm -f "$SSH_BANNER_FILE"
+                sed -i.bak -E "s/^( *Banner\s+$SSH_BANNER_FILE)/#\1/" /etc/ssh/sshd_config
+                
+                touch "/etc/firewallfalcon/banners_enabled"
+                update_ssh_banners_config
+                echo -e "\n${C_GREEN}✅ Dynamic Banner Enabled. Manual Banner Disabled.${C_RESET}"
+                press_enter
+                ;;
+            2)
+                rm -f "/etc/firewallfalcon/banners_enabled"
+                update_ssh_banners_config
+                echo -e "\n${C_YELLOW}❌ Dynamic Banner Disabled.${C_RESET}"
+                press_enter
+                ;;
+            3) set_ssh_banner_paste ;;
+            4) view_ssh_banner ;;
+            5) remove_ssh_banner ;;
+            6) 
+                if [[ ! -f "/etc/firewallfalcon/banners_enabled" ]]; then
+                    echo -e "\n${C_RED}❌ Please Enable Dynamic Banner (Option 1) first.${C_RESET}"
+                    press_enter
+                else
+                    _select_user_interface "--- 📝 Preview Dynamic Banner ---"
+                    local u=$SELECTED_USER
+                    if [[ -n "$u" && "$u" != "NO_USERS" ]]; then
+                        echo -e "\n${C_CYAN}--- Banner Preview for '$u' ---${C_RESET}\n"
+                        cat "/etc/firewallfalcon/banners/${u}.txt" 2>/dev/null || echo "Banner not generated yet."
+                        press_enter
+                    fi
+                fi
+                ;;
+            0) return ;;
+            *) invalid_option ;;
+        esac
+    done
+}
+
+/*ssh_banner_menu() {
+    while true; do
         show_banner
         local banner_status
         if grep -q -E "^\s*Banner\s+$SSH_BANNER_FILE" /etc/ssh/sshd_config && [ -f "$SSH_BANNER_FILE" ]; then
@@ -1335,7 +1411,7 @@ ssh_banner_menu() {
             *) echo -e "\n${C_RED}❌ Invalid option.${C_RESET}" && sleep 2 ;;
         esac
     done
-}
+}*/
 
 install_udp_custom() {
     clear; show_banner

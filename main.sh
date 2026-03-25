@@ -1237,6 +1237,29 @@ _restart_ssh() {
 }
 
 set_ssh_banner_paste() {
+    if [[ -f "/etc/firewallfalcon/banners_enabled" ]]; then
+        clear; show_banner
+        echo -e "${C_WARN}⚠️  Dynamic Login Banner is currently ENABLED!${C_RESET}"
+        echo -e "${C_WHITE}Please disable 'Enable Login Banner' (Option 2) first before setting a manual banner.${C_RESET}"
+        echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
+        return
+    fi
+
+    clear; show_banner
+    echo -e "${C_BOLD}${C_PURPLE}--- 📋 Paste Manual SSH Banner ---${C_RESET}"
+    echo -e "Paste your banner code below. Press ${C_YELLOW}[Ctrl+D]${C_RESET} when you are finished."
+    echo -e "${C_DIM}The manual banner will be shown because Dynamic Banner is OFF.${C_RESET}"
+    echo -e "--------------------------------------------------"
+    cat > "$SSH_BANNER_FILE"
+    chmod 644 "$SSH_BANNER_FILE"
+    echo -e "\n--------------------------------------------------"
+    echo -e "\n${C_GREEN}✅ Manual Banner content saved.${C_RESET}"
+    _enable_banner_in_sshd_config
+    _restart_ssh
+    echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
+}
+
+*/set_ssh_banner_paste() {
     clear; show_banner
     echo -e "${C_BOLD}${C_PURPLE}--- 📋 Paste SSH Banner ---${C_RESET}"
     echo -e "Paste your banner code below. Press ${C_YELLOW}[Ctrl+D]${C_RESET} when you are finished."
@@ -1249,7 +1272,7 @@ set_ssh_banner_paste() {
     _enable_banner_in_sshd_config
     _restart_ssh
     echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
-}
+}/*
 
 view_ssh_banner() {
     clear; show_banner

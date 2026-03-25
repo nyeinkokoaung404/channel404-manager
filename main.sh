@@ -2850,6 +2850,8 @@ uninstall_script() {
     systemctl daemon-reload
     
     echo -e "\n${C_BLUE}🗑️ Removing script and configuration files...${C_RESET}"
+    rm -f "$LICENSE_KEY_FILE"
+    rm -f "$INSTALL_FLAG_FILE"
     rm -rf "$BADVPN_BUILD_DIR"
     rm -rf "$UDP_CUSTOM_DIR"
     rm -rf "$DB_DIR"

@@ -1259,21 +1259,6 @@ set_ssh_banner_paste() {
     echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
 }
 
-/*set_ssh_banner_paste() {
-    clear; show_banner
-    echo -e "${C_BOLD}${C_PURPLE}--- 📋 Paste SSH Banner ---${C_RESET}"
-    echo -e "Paste your banner code below. Press ${C_YELLOW}[Ctrl+D]${C_RESET} when you are finished."
-    echo -e "${C_DIM}The current banner (if any) will be overwritten.${C_RESET}"
-    echo -e "--------------------------------------------------"
-    cat > "$SSH_BANNER_FILE"
-    chmod 644 "$SSH_BANNER_FILE"
-    echo -e "\n--------------------------------------------------"
-    echo -e "\n${C_GREEN}✅ Banner content saved from paste.${C_RESET}"
-    _enable_banner_in_sshd_config
-    _restart_ssh
-    echo -e "\nPress ${C_YELLOW}[Enter]${C_RESET} to return..." && read -r
-}*/
-
 view_ssh_banner() {
     clear; show_banner
     echo -e "${C_BOLD}${C_PURPLE}--- 👁️ Current SSH Banner ---${C_RESET}"
@@ -1384,34 +1369,6 @@ ssh_banner_menu() {
         esac
     done
 }
-
-/*ssh_banner_menu() {
-    while true; do
-        show_banner
-        local banner_status
-        if grep -q -E "^\s*Banner\s+$SSH_BANNER_FILE" /etc/ssh/sshd_config && [ -f "$SSH_BANNER_FILE" ]; then
-            banner_status="${C_STATUS_A}(Active)${C_RESET}"
-        else
-            banner_status="${C_STATUS_I}(Inactive)${C_RESET}"
-        fi
-        
-        echo -e "\n   ${C_TITLE}═════════════════[ ${C_BOLD}🎨 SSH Banner Management ${banner_status} ${C_RESET}${C_TITLE}]═════════════════${C_RESET}"
-        printf "     ${C_CHOICE}[ 1]${C_RESET} %-40s\n" "📋 Paste or Edit Banner"
-        printf "     ${C_CHOICE}[ 2]${C_RESET} %-40s\n" "👁️ View Current Banner"
-        printf "     ${C_DANGER}[ 3]${C_RESET} %-40s\n" "🗑️ Disable and Remove Banner"
-        echo -e "   ${C_DIM}~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~${C_RESET}"
-        echo -e "     ${C_WARN}[ 0]${C_RESET} ↩️ Return to Main Menu"
-        echo
-        read -p "$(echo -e ${C_PROMPT}"👉 Select an option: "${C_RESET})" choice
-        case $choice in
-            1) set_ssh_banner_paste ;;
-            2) view_ssh_banner ;;
-            3) remove_ssh_banner ;;
-            0) return ;;
-            *) echo -e "\n${C_RED}❌ Invalid option.${C_RESET}" && sleep 2 ;;
-        esac
-    done
-}*/
 
 install_udp_custom() {
     clear; show_banner

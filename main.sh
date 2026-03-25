@@ -66,8 +66,8 @@ ZIVPN_CONFIG_FILE="$ZIVPN_DIR/config.json"
 ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
-DESEC_TOKEN="iEJiTqzmhQbmMDnnwg4Q4ajo7hHL"
-DESEC_DOMAIN="channel404.manager.qzz.io"
+DESEC_TOKEN="V55cFY8zTictLCPfviiuX5DHjs15"
+DESEC_DOMAIN="manager.firewallfalcon.qzz.io"
 
 SELECTED_USER=""
 UNINSTALL_MODE="interactive"

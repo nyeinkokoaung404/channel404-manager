@@ -66,8 +66,8 @@ ZIVPN_CONFIG_FILE="$ZIVPN_DIR/config.json"
 ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
-DESEC_TOKEN="7g7Hnzqtyda2xUqNUwfEhpysJAPv"
-DESEC_DOMAIN="channel404.dedyn.io"
+DESEC_TOKEN="twFnxWT7t1vpWJqAXM1EpLSf8Aw3"
+DESEC_DOMAIN="manager.channel404.qzz.io"
 
 SELECTED_USER=""
 UNINSTALL_MODE="interactive"

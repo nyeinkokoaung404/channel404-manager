@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 C_RESET=$'\033[0m'
 C_BOLD=$'\033[1m'
@@ -52,6 +51,12 @@ FALCONPROXY_BINARY="/usr/local/bin/falconproxy"
 FALCONPROXY_CONFIG_FILE="$DB_DIR/falconproxy_config.conf"
 LIMITER_SCRIPT="/usr/local/bin/firewallfalcon-limiter.sh"
 LIMITER_SERVICE="/etc/systemd/system/firewallfalcon-limiter.service"
+BANDWIDTH_DIR="$DB_DIR/bandwidth"
+BANDWIDTH_SCRIPT="/usr/local/bin/firewallfalcon-bandwidth.sh"
+BANDWIDTH_SERVICE="/etc/systemd/system/firewallfalcon-bandwidth.service"
+TRIAL_CLEANUP_SCRIPT="/usr/local/bin/firewallfalcon-trial-cleanup.sh"
+LOGIN_INFO_SCRIPT="/usr/local/bin/firewallfalcon-login-info.sh"
+SSHD_FF_CONFIG="/etc/ssh/sshd_config.d/firewallfalcon.conf"
 
 # --- ZiVPN Variables ---
 ZIVPN_DIR="/etc/zivpn"
@@ -61,15 +66,13 @@ ZIVPN_CONFIG_FILE="$ZIVPN_DIR/config.json"
 ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
-DESEC_TOKEN="7g7Hnzqtyda2xUqNUwfEhpysJAPv"
-DESEC_DOMAIN="channel404.dedyn.io"
+DESEC_TOKEN="V55cFY8zTictLCPfviiuX5DHjs15"
+DESEC_DOMAIN="manager.firewallfalcon.qzz.io"
 
 SELECTED_USER=""
 UNINSTALL_MODE="interactive"
-
 LICENSE_EXPIRE="Unknown"
 
-# --- 🔑 LICENSE & IP VERIFICATION LOGIC ---
 verify_license() {
     mkdir -p "$DB_DIR"
     local vps_ip=$(wget -4 -qO- http://checkip.amazonaws.com || curl -s4 icanhazip.com)
@@ -131,7 +134,6 @@ verify_license() {
     sleep 1
 }
 
-# --- ROOT CHECK ---
 if [[ $EUID -ne 0 ]]; then
    echo -e "${C_RED}❌ Error: This script requires root privileges to run.${C_RESET}"
    exit 1
@@ -161,9 +163,19 @@ initial_setup() {
     mkdir -p "$DB_DIR"
     touch "$DB_FILE"
     mkdir -p "$SSL_CERT_DIR"
+    mkdir -p "$BANDWIDTH_DIR"
     
     echo -e "${C_BLUE}🔹 Configuring user limiter service...${C_RESET}"
     setup_limiter_service
+    
+    echo -e "${C_BLUE}🔹 Configuring bandwidth monitoring service...${C_RESET}"
+    setup_bandwidth_service
+    
+    echo -e "${C_BLUE}🔹 Installing trial account cleanup script...${C_RESET}"
+    setup_trial_cleanup_script
+    
+    echo -e "${C_BLUE}🔹 Configuring SSH login info banner...${C_RESET}"
+    setup_ssh_login_info
     
     if [ ! -f "$INSTALL_FLAG_FILE" ]; then
         touch "$INSTALL_FLAG_FILE"
@@ -264,12 +276,15 @@ check_and_free_ports() {
 }
 
 setup_limiter_service() {
-    # Updated logic: No logging, smart 120s lockout
+    # Combined limiter + bandwidth monitoring
     cat > "$LIMITER_SCRIPT" << 'EOF'
 #!/bin/bash
 DB_FILE="/etc/firewallfalcon/users.db"
+BW_DIR="/etc/firewallfalcon/bandwidth"
+PID_DIR="$BW_DIR/pidtrack"
 
-# Loop continuously with optimized sleep
+mkdir -p "$BW_DIR" "$PID_DIR"
+
 while true; do
     if [[ ! -f "$DB_FILE" ]]; then
         sleep 30
@@ -278,19 +293,10 @@ while true; do
     
     current_ts=$(date +%s)
     
-    # Cache active users to minimize pgrep calls inside loop
-    # Get count of sshd processes per user in one go is hard in bash without map,
-    # so we optimize the per-user check.
-    
-    while IFS=: read -r user pass expiry limit; do
+    while IFS=: read -r user pass expiry limit bandwidth_gb _extra; do
         [[ -z "$user" || "$user" == \#* ]] && continue
         
-        # 1. Active Check (Skip if user has no processes to save CPU)
-        # pgrep -u is relatively cheap, but let's be smart.
-        # If connection limit is huge, we might not care.
-        
         # --- Expiry Check ---
-        # Only check expiry if we have a valid expiry date
         if [[ "$expiry" != "Never" && "$expiry" != "" ]]; then
              expiry_ts=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
              if [[ $expiry_ts -lt $current_ts && $expiry_ts -ne 0 ]]; then
@@ -303,7 +309,6 @@ while true; do
         fi
         
         # --- Connection Limit Check ---
-        # Optimization: pgrep -c is faster than pipe to wc
         online_count=$(pgrep -c -u "$user" sshd)
         if ! [[ "$limit" =~ ^[0-9]+$ ]]; then limit=1; fi
         
@@ -316,13 +321,155 @@ while true; do
                 killall -u "$user" -9 &>/dev/null
             fi
         fi
+        
+        # --- SSH Banner Generation (Delay of 1 cycle for BW stats is fine) ---
+        if [[ -f "/etc/firewallfalcon/banners_enabled" ]]; then
+            mkdir -p "/etc/firewallfalcon/banners"
+            days_left="N/A"
+            if [[ "$expiry" != "Never" && -n "$expiry" ]]; then
+                if [[ $expiry_ts -gt 0 ]]; then
+                    diff_secs=$((expiry_ts - current_ts))
+                    if [[ $diff_secs -le 0 ]]; then
+                        days_left="EXPIRED"
+                    else
+                        d_l=$(( diff_secs / 86400 ))
+                        h_l=$(( (diff_secs % 86400) / 3600 ))
+                        if [[ $d_l -eq 0 ]]; then days_left="${h_l}h left"
+                        else days_left="${d_l}d ${h_l}h"; fi
+                    fi
+                fi
+            fi
+            
+            bw_info="Unlimited"
+            if [[ "$bandwidth_gb" != "0" && -n "$bandwidth_gb" ]]; then
+                usagefile="$BW_DIR/${user}.usage"
+                accum_disp=0
+                [[ -f "$usagefile" ]] && accum_disp=$(cat "$usagefile" 2>/dev/null)
+                used_gb=$(awk "BEGIN {printf \"%.2f\", $accum_disp / 1073741824}")
+                remain_gb=$(awk "BEGIN {r=$bandwidth_gb - $used_gb; if(r<0) r=0; printf \"%.2f\", r}")
+                bw_info="${used_gb}/${bandwidth_gb} GB used | ${remain_gb} GB left"
+            fi
+            
+            # Format the output with HTML tags since clients like HTTP Custom render Server Messages using Html.fromHtml()
+            # Crucial: Use echo -e instead of heredoc to prevent DOS CRLF syntax errors when moving script to Linux
+            echo -e "<br><font color=\"yellow\"><b>      ✨ ACCOUNT STATUS ✨      </b></font><br><br>" > "/etc/firewallfalcon/banners/${user}.txt"
+            echo -e "<font color=\"white\">👤 <b>Username   :</b> $user</font><br>" >> "/etc/firewallfalcon/banners/${user}.txt"
+            echo -e "<font color=\"white\">📅 <b>Expiration :</b> $expiry ($days_left)</font><br>" >> "/etc/firewallfalcon/banners/${user}.txt"
+            echo -e "<font color=\"white\">📊 <b>Bandwidth  :</b> $bw_info</font><br>" >> "/etc/firewallfalcon/banners/${user}.txt"
+            echo -e "<font color=\"white\">🔌 <b>Sessions   :</b> $online_count/$limit</font><br><br>" >> "/etc/firewallfalcon/banners/${user}.txt"
+        fi
+
+        
+        # --- Bandwidth Check ---
+        [[ -z "$bandwidth_gb" || "$bandwidth_gb" == "0" ]] && continue
+        
+        # Get user UID
+        user_uid=$(id -u "$user" 2>/dev/null)
+        [[ -z "$user_uid" ]] && continue
+        
+        # Find sshd PIDs for this user via loginuid
+        pids=""
+        
+        # Method 1: pgrep
+        m1=$(pgrep -u "$user" sshd 2>/dev/null | tr '\n' ' ')
+        pids="$m1"
+        
+        # Method 2: loginuid scan
+        for p in /proc/[0-9]*/loginuid; do
+            [[ ! -f "$p" ]] && continue
+            luid=$(cat "$p" 2>/dev/null)
+            [[ -z "$luid" || "$luid" == "4294967295" ]] && continue
+            [[ "$luid" != "$user_uid" ]] && continue
+            
+            pid_dir=$(dirname "$p")
+            pid_num=$(basename "$pid_dir")
+            
+            cname=$(cat "$pid_dir/comm" 2>/dev/null)
+            [[ "$cname" != "sshd" ]] && continue
+            
+            ppid_val=$(awk '/^PPid:/{print $2}' "$pid_dir/status" 2>/dev/null)
+            [[ "$ppid_val" == "1" ]] && continue
+            
+            pids="$pids $pid_num"
+        done
+        
+        # Deduplicate
+        pids=$(echo "$pids" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ')
+        
+        # Read accumulated usage
+        usagefile="$BW_DIR/${user}.usage"
+        accumulated=0
+        if [[ -f "$usagefile" ]]; then
+            accumulated=$(cat "$usagefile" 2>/dev/null)
+            if ! [[ "$accumulated" =~ ^[0-9]+$ ]]; then accumulated=0; fi
+        fi
+        
+        if [[ -z "$pids" ]]; then
+            rm -f "$PID_DIR/${user}__"*.last 2>/dev/null
+            continue
+        fi
+        
+        delta_total=0
+        
+        for pid in $pids; do
+            [[ -z "$pid" ]] && continue
+            io_file="/proc/$pid/io"
+            if [[ -r "$io_file" ]]; then
+                rchar=$(awk '/^rchar:/{print $2}' "$io_file" 2>/dev/null)
+                wchar=$(awk '/^wchar:/{print $2}' "$io_file" 2>/dev/null)
+                [[ -z "$rchar" ]] && rchar=0
+                [[ -z "$wchar" ]] && wchar=0
+                cur=$((rchar + wchar))
+            else
+                cur=0
+            fi
+            
+            pidfile="$PID_DIR/${user}__${pid}.last"
+            
+            if [[ -f "$pidfile" ]]; then
+                prev=$(cat "$pidfile" 2>/dev/null)
+                if ! [[ "$prev" =~ ^[0-9]+$ ]]; then prev=0; fi
+                
+                if [[ "$cur" -ge "$prev" ]]; then
+                    d=$((cur - prev))
+                else
+                    d=$cur
+                fi
+                delta_total=$((delta_total + d))
+            fi
+            echo "$cur" > "$pidfile"
+        done
+        
+        # Clean up dead PID files
+        for f in "$PID_DIR/${user}__"*.last; do
+            [[ ! -f "$f" ]] && continue
+            fpid=$(basename "$f" .last)
+            fpid=${fpid#${user}__}
+            [[ ! -d "/proc/$fpid" ]] && rm -f "$f"
+        done
+        
+        # Update total
+        new_total=$((accumulated + delta_total))
+        echo "$new_total" > "$usagefile"
+        
+        # Check quota
+        quota_bytes=$(awk "BEGIN {printf \"%.0f\", $bandwidth_gb * 1073741824}")
+        
+        if [[ "$new_total" -ge "$quota_bytes" ]]; then
+            if ! passwd -S "$user" 2>/dev/null | grep -q " L "; then
+                usermod -L "$user" &>/dev/null
+                killall -u "$user" -9 &>/dev/null
+            fi
+        fi
+        
     done < "$DB_FILE"
     
-    # Sleep increased to 25 seconds to reduce CPU load
-    sleep 25
+    sleep 15
 done
 EOF
     chmod +x "$LIMITER_SCRIPT"
+    # Strip DOS line endings in case menu.sh was uploaded from Windows
+    sed -i 's/\r$//' "$LIMITER_SCRIPT" 2>/dev/null
 
     cat > "$LIMITER_SERVICE" << EOF
 [Unit]
@@ -338,8 +485,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
+    sed -i 's/\r$//' "$LIMITER_SERVICE" 2>/dev/null
 
-    # Force kill any old limiter process to prevent systemctl restart hanging
     pkill -f "firewallfalcon-limiter" 2>/dev/null
 
     if ! systemctl is-active --quiet firewallfalcon-limiter; then
@@ -348,10 +495,86 @@ EOF
         systemctl start firewallfalcon-limiter --no-block &>/dev/null
         
     else
-        # Restart if already running to apply new logic
         systemctl restart firewallfalcon-limiter --no-block &>/dev/null
         
     fi
+}
+
+setup_bandwidth_service() {
+    mkdir -p "$BANDWIDTH_DIR"
+    # Bandwidth monitoring is now integrated into the limiter service above.
+    # Stop the old standalone bandwidth service if it exists.
+    if systemctl is-active --quiet firewallfalcon-bandwidth 2>/dev/null; then
+        systemctl stop firewallfalcon-bandwidth &>/dev/null
+        systemctl disable firewallfalcon-bandwidth &>/dev/null
+    fi
+    rm -f "$BANDWIDTH_SERVICE" "$BANDWIDTH_SCRIPT" 2>/dev/null
+}
+
+setup_trial_cleanup_script() {
+    cat > "$TRIAL_CLEANUP_SCRIPT" << 'TREOF'
+#!/bin/bash
+# FirewallFalcon Trial Account Auto-Cleanup
+# Usage: firewallfalcon-trial-cleanup.sh <username>
+DB_FILE="/etc/firewallfalcon/users.db"
+BW_DIR="/etc/firewallfalcon/bandwidth"
+
+username="$1"
+if [[ -z "$username" ]]; then exit 1; fi
+
+# Kill active sessions
+killall -u "$username" -9 &>/dev/null
+sleep 1
+
+# Delete system user
+userdel -r "$username" &>/dev/null
+
+# Remove from DB
+sed -i "/^${username}:/d" "$DB_FILE"
+
+# Remove bandwidth tracking
+rm -f "$BW_DIR/${username}.usage"
+rm -rf "$BW_DIR/pidtrack/${username}"
+TREOF
+    chmod +x "$TRIAL_CLEANUP_SCRIPT"
+}
+
+update_ssh_banners_config() {
+    rm -f /usr/local/bin/firewallfalcon-login-info.sh 2>/dev/null
+    
+    if [[ ! -f "/etc/firewallfalcon/banners_enabled" ]]; then
+        rm -f "$SSHD_FF_CONFIG" 2>/dev/null
+        systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null
+        return
+    fi
+    
+    mkdir -p "/etc/firewallfalcon/banners" /etc/ssh/sshd_config.d
+    
+    tmp_conf="/tmp/ff_banners_new.conf"
+    echo "# FirewallFalcon - Show login info native banners" > "$tmp_conf"
+    
+    if [[ -f "$DB_FILE" ]]; then
+        while IFS=: read -r u _rest; do
+            [[ -z "$u" || "$u" == \#* ]] && continue
+            echo "Match User $u" >> "$tmp_conf"
+            echo "    Banner /etc/firewallfalcon/banners/${u}.txt" >> "$tmp_conf"
+        done < "$DB_FILE"
+    fi
+    
+    if ! cmp -s "$tmp_conf" "$SSHD_FF_CONFIG" 2>/dev/null; then
+        mv "$tmp_conf" "$SSHD_FF_CONFIG"
+        if ! grep -q "^Include /etc/ssh/sshd_config.d/" /etc/ssh/sshd_config 2>/dev/null; then
+            echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+        fi
+        systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null
+    else
+        rm -f "$tmp_conf"
+    fi
+}
+
+setup_ssh_login_info() {
+    touch "/etc/firewallfalcon/banners_enabled"
+    update_ssh_banners_config
 }
 
 
@@ -533,30 +756,42 @@ create_user() {
     fi
     local password=""
     while true; do
-        read -p "🔑 Enter new password: " password
+        read -p "🔑 Enter password (or press Enter for auto-generated): " password
         if [[ -z "$password" ]]; then
-            echo -e "${C_RED}❌ Password cannot be empty. Please try again.${C_RESET}"
+            password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+            echo -e "${C_GREEN}🔑 Auto-generated password: ${C_YELLOW}$password${C_RESET}"
+            break
         else
             break
         fi
     done
     read -p "🗓️ Enter account duration (in days): " days
     if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
-    read -p "📶 Enter simultaneous connection limit: " limit
+    read -p "📶 Enter simultaneous connection limit [1]: " limit
+    limit=${limit:-1}
     if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    read -p "📦 Enter bandwidth limit in GB (0 = unlimited) [0]: " bandwidth_gb
+    bandwidth_gb=${bandwidth_gb:-0}
+    if ! [[ "$bandwidth_gb" =~ ^[0-9]+\.?[0-9]*$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     local expire_date
     expire_date=$(date -d "+$days days" +%Y-%m-%d)
     user_limit=$limit
-    useradd -m -s /usr/sbin/nologin "$username"; echo "$username:$password" | chpasswd; chage -E "$expire_date" "$username"
-    echo "$username:$password:$expire_date:$limit" >> "$DB_FILE"
+    useradd -m -s /usr/sbin/nologin "$username"
+    usermod -aG ffusers "$username" 2>/dev/null
+    echo "$username:$password" | chpasswd; chage -E "$expire_date" "$username"
+    echo "$username:$password:$expire_date:$limit:$bandwidth_gb" >> "$DB_FILE"
+    
+    local bw_display="Unlimited"
+    if [[ "$bandwidth_gb" != "0" ]]; then bw_display="${bandwidth_gb} GB"; fi
     
     clear; show_banner
     echo -e "${C_GREEN}✅ User '$username' created successfully!${C_RESET}\n"
     echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
     echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
-    echo -e "  - 🗓️ Expires on:       ${C_YELLOW}$expire_date${C_RESET}"
+    echo -e "  - 🗓️ Expires on:         ${C_YELLOW}$expire_date${C_RESET}"
     echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$user_limit${C_RESET}"
-    echo -e "    ${C_DIM}(Active monitoring service will enforce this limit)${C_RESET}"
+    echo -e "  - 📦 Bandwidth Limit:   ${C_YELLOW}$bw_display${C_RESET}"
+    echo -e "    ${C_DIM}(Active monitoring service will enforce these limits)${C_RESET}"
 
     # Auto-ask for config generation
     echo
@@ -564,6 +799,8 @@ create_user() {
     if [[ "$gen_conf" == "y" || "$gen_conf" == "Y" ]]; then
         generate_client_config "$username" "$password"
     fi
+    
+    update_ssh_banners_config
 }
 
 delete_user() {
@@ -610,8 +847,14 @@ delete_user() {
          echo -e "\n${C_RED}❌ Failed to delete system user '$username'.${C_RESET}"
     fi
 
+    # Clean up bandwidth tracking
+    rm -f "$BANDWIDTH_DIR/${username}.usage"
+    rm -rf "$BANDWIDTH_DIR/pidtrack/${username}"
+
     sed -i "/^$username:/d" "$DB_FILE"
     echo -e "${C_GREEN}✅ User '$username' has been completely removed.${C_RESET}"
+    
+    update_ssh_banners_config
 }
 
 edit_user() {
@@ -620,41 +863,78 @@ edit_user() {
     if [[ "$username" == "NO_USERS" ]] || [[ -z "$username" ]]; then return; fi
     while true; do
         clear; show_banner; echo -e "${C_BOLD}${C_PURPLE}--- Editing User: ${C_YELLOW}$username${C_PURPLE} ---${C_RESET}"
+        
+        # Show current user details
+        local current_line; current_line=$(grep "^$username:" "$DB_FILE")
+        local cur_pass; cur_pass=$(echo "$current_line" | cut -d: -f2)
+        local cur_expiry; cur_expiry=$(echo "$current_line" | cut -d: -f3)
+        local cur_limit; cur_limit=$(echo "$current_line" | cut -d: -f4)
+        local cur_bw; cur_bw=$(echo "$current_line" | cut -d: -f5)
+        [[ -z "$cur_bw" ]] && cur_bw="0"
+        local cur_bw_display="Unlimited"; [[ "$cur_bw" != "0" ]] && cur_bw_display="${cur_bw} GB"
+        
+        # Show bandwidth usage
+        local bw_used_display="N/A"
+        if [[ -f "$BANDWIDTH_DIR/${username}.usage" ]]; then
+            local used_bytes; used_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null)
+            if [[ -n "$used_bytes" && "$used_bytes" != "0" ]]; then
+                bw_used_display=$(awk "BEGIN {printf \"%.2f GB\", $used_bytes / 1073741824}")
+            else
+                bw_used_display="0.00 GB"
+            fi
+        fi
+        
+        echo -e "\n  ${C_DIM}Current: Pass=${C_YELLOW}$cur_pass${C_RESET}${C_DIM} Exp=${C_YELLOW}$cur_expiry${C_RESET}${C_DIM} Conn=${C_YELLOW}$cur_limit${C_RESET}${C_DIM} BW=${C_YELLOW}$cur_bw_display${C_RESET}${C_DIM} Used=${C_CYAN}$bw_used_display${C_RESET}"
         echo -e "\nSelect a detail to edit:\n"
         printf "  ${C_GREEN}[ 1]${C_RESET} %-35s\n" "🔑 Change Password"
         printf "  ${C_GREEN}[ 2]${C_RESET} %-35s\n" "🗓️ Change Expiration Date"
         printf "  ${C_GREEN}[ 3]${C_RESET} %-35s\n" "📶 Change Connection Limit"
+        printf "  ${C_GREEN}[ 4]${C_RESET} %-35s\n" "📦 Change Bandwidth Limit"
+        printf "  ${C_GREEN}[ 5]${C_RESET} %-35s\n" "🔄 Reset Bandwidth Counter"
         echo -e "\n  ${C_RED}[ 0]${C_RESET} ✅ Finish Editing"; echo; read -p "👉 Enter your choice: " edit_choice
         case $edit_choice in
             1)
                local new_pass=""
-               while true; do
-                   read -p "Enter new password: " new_pass
-                   if [[ -z "$new_pass" ]]; then
-                       echo -e "${C_RED}❌ Password cannot be empty. Please try again.${C_RESET}"
-                   else
-                       break
-                   fi
-               done
+               read -p "Enter new password (or press Enter for auto-generated): " new_pass
+               if [[ -z "$new_pass" ]]; then
+                   new_pass=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+                   echo -e "${C_GREEN}🔑 Auto-generated: ${C_YELLOW}$new_pass${C_RESET}"
+               fi
                echo "$username:$new_pass" | chpasswd
-               local current_line; current_line=$(grep "^$username:" "$DB_FILE"); local expiry; expiry=$(echo "$current_line" | cut -d: -f3); local limit; limit=$(echo "$current_line" | cut -d: -f4)
-               sed -i "s/^$username:.*/$username:$new_pass:$expiry:$limit/" "$DB_FILE"
-               echo -e "\n${C_GREEN}✅ Password for '$username' changed successfully.${C_RESET}"
-               echo -e "New Password: ${C_YELLOW}$new_pass${C_RESET}"
+               sed -i "s/^$username:.*/$username:$new_pass:$cur_expiry:$cur_limit:$cur_bw/" "$DB_FILE"
+               echo -e "\n${C_GREEN}✅ Password for '$username' changed to: ${C_YELLOW}$new_pass${C_RESET}"
                ;;
             2) read -p "Enter new duration (in days from today): " days
                if [[ "$days" =~ ^[0-9]+$ ]]; then
                    local new_expire_date; new_expire_date=$(date -d "+$days days" +%Y-%m-%d); chage -E "$new_expire_date" "$username"
-                   local current_line; current_line=$(grep "^$username:" "$DB_FILE"); local pass; pass=$(echo "$current_line" | cut -d: -f2); local limit; limit=$(echo "$current_line" | cut -d: -f4)
-                   sed -i "s/^$username:.*/$username:$pass:$new_expire_date:$limit/" "$DB_FILE"
+                   sed -i "s/^$username:.*/$username:$cur_pass:$new_expire_date:$cur_limit:$cur_bw/" "$DB_FILE"
                    echo -e "\n${C_GREEN}✅ Expiration for '$username' set to ${C_YELLOW}$new_expire_date${C_RESET}."
                else echo -e "\n${C_RED}❌ Invalid number of days.${C_RESET}"; fi ;;
             3) read -p "Enter new simultaneous connection limit: " new_limit
                if [[ "$new_limit" =~ ^[0-9]+$ ]]; then
-                   local current_line; current_line=$(grep "^$username:" "$DB_FILE"); local pass; pass=$(echo "$current_line" | cut -d: -f2); local expiry; expiry=$(echo "$current_line" | cut -d: -f3)
-                   sed -i "s/^$username:.*/$username:$pass:$expiry:$new_limit/" "$DB_FILE"
+                   sed -i "s/^$username:.*/$username:$cur_pass:$cur_expiry:$new_limit:$cur_bw/" "$DB_FILE"
                    echo -e "\n${C_GREEN}✅ Connection limit for '$username' set to ${C_YELLOW}$new_limit${C_RESET}."
                else echo -e "\n${C_RED}❌ Invalid limit.${C_RESET}"; fi ;;
+            4) read -p "Enter new bandwidth limit in GB (0 = unlimited): " new_bw
+               if [[ "$new_bw" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+                   sed -i "s/^$username:.*/$username:$cur_pass:$cur_expiry:$cur_limit:$new_bw/" "$DB_FILE"
+                   local bw_msg="Unlimited"; [[ "$new_bw" != "0" ]] && bw_msg="${new_bw} GB"
+                   echo -e "\n${C_GREEN}✅ Bandwidth limit for '$username' set to ${C_YELLOW}$bw_msg${C_RESET}."
+                   # Unlock user if they were locked due to bandwidth
+                   if [[ "$new_bw" == "0" ]] || [[ -f "$BANDWIDTH_DIR/${username}.usage" ]]; then
+                       local used_bytes; used_bytes=$(cat "$BANDWIDTH_DIR/${username}.usage" 2>/dev/null || echo 0)
+                       local new_quota_bytes; new_quota_bytes=$(awk "BEGIN {printf \"%.0f\", $new_bw * 1073741824}")
+                       if [[ "$new_bw" == "0" ]] || [[ "$used_bytes" -lt "$new_quota_bytes" ]]; then
+                           usermod -U "$username" &>/dev/null
+                       fi
+                   fi
+               else echo -e "\n${C_RED}❌ Invalid bandwidth value.${C_RESET}"; fi ;;
+            5)
+               echo "0" > "$BANDWIDTH_DIR/${username}.usage"
+               # Unlock user if they were locked due to bandwidth
+               usermod -U "$username" &>/dev/null
+               echo -e "\n${C_GREEN}✅ Bandwidth counter for '$username' has been reset to 0.${C_RESET}"
+               ;;
             0) return ;;
             *) echo -e "\n${C_RED}❌ Invalid option.${C_RESET}" ;;
         esac
@@ -740,11 +1020,11 @@ list_users() {
         return
     fi
     echo -e "${C_BOLD}${C_PURPLE}--- 📋 Managed Users ---${C_RESET}"
-    echo -e "${C_CYAN}======================================================================${C_RESET}"
-    printf "${C_BOLD}${C_WHITE}%-20s | %-12s | %-15s | %-20s${C_RESET}\n" "USERNAME" "EXPIRES" "CONNECTIONS" "STATUS"
-    echo -e "${C_CYAN}----------------------------------------------------------------------${C_RESET}"
+    echo -e "${C_CYAN}=========================================================================================${C_RESET}"
+    printf "${C_BOLD}${C_WHITE}%-18s | %-12s | %-10s | %-15s | %-20s${C_RESET}\n" "USERNAME" "EXPIRES" "CONNS" "BANDWIDTH" "STATUS"
+    echo -e "${C_CYAN}-----------------------------------------------------------------------------------------${C_RESET}"
     
-    while IFS=: read -r user pass expiry limit; do
+    while IFS=: read -r user pass expiry limit bandwidth_gb _extra; do
         local online_count
         online_count=$(pgrep -u "$user" sshd | wc -l)
         
@@ -755,6 +1035,20 @@ list_users() {
         plain_status=$(echo -e "$status" | sed 's/\x1b\[[0-9;]*m//g')
         
         local connection_string="$online_count / $limit"
+        
+        # Bandwidth display
+        [[ -z "$bandwidth_gb" ]] && bandwidth_gb="0"
+        local bw_string="Unlimited"
+        if [[ "$bandwidth_gb" != "0" ]]; then
+            local used_bytes=0
+            if [[ -f "$BANDWIDTH_DIR/${user}.usage" ]]; then
+                used_bytes=$(cat "$BANDWIDTH_DIR/${user}.usage" 2>/dev/null)
+                [[ -z "$used_bytes" ]] && used_bytes=0
+            fi
+            local used_gb
+            used_gb=$(awk "BEGIN {printf \"%.1f\", $used_bytes / 1073741824}")
+            bw_string="${used_gb}/${bandwidth_gb}GB"
+        fi
 
         local line_color="$C_WHITE"
         case $plain_status in
@@ -764,17 +1058,18 @@ list_users() {
             *"Not Found"*) line_color="$C_DIM" ;;
         esac
 
-        printf "${line_color}%-20s ${C_RESET}| ${C_YELLOW}%-12s ${C_RESET}| ${C_CYAN}%-15s ${C_RESET}| %-20s\n" "$user" "$expiry" "$connection_string" "$status"
+        printf "${line_color}%-18s ${C_RESET}| ${C_YELLOW}%-12s ${C_RESET}| ${C_CYAN}%-10s ${C_RESET}| ${C_ORANGE}%-15s ${C_RESET}| %-20s\n" "$user" "$expiry" "$connection_string" "$bw_string" "$status"
     done < <(sort "$DB_FILE")
-    echo -e "${C_CYAN}======================================================================${C_RESET}\n"
+    echo -e "${C_CYAN}=========================================================================================${C_RESET}\n"
 }
 
 renew_user() {
     _select_user_interface "--- 🔄 Renew a User ---"; local u=$SELECTED_USER; if [[ "$u" == "NO_USERS" || -z "$u" ]]; then return; fi
     read -p "👉 Enter number of days to extend the account: " days; if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
     local new_expire_date; new_expire_date=$(date -d "+$days days" +%Y-%m-%d); chage -E "$new_expire_date" "$u"
-    local line; line=$(grep "^$u:" "$DB_FILE"); local pass; pass=$(echo "$line"|cut -d: -f2); local limit; limit=$(echo "$line"|cut -d: -f4)
-    sed -i "s/^$u:.*/$u:$pass:$new_expire_date:$limit/" "$DB_FILE"
+    local line; line=$(grep "^$u:" "$DB_FILE"); local pass; pass=$(echo "$line"|cut -d: -f2); local limit; limit=$(echo "$line"|cut -d: -f4); local bw; bw=$(echo "$line"|cut -d: -f5)
+    [[ -z "$bw" ]] && bw="0"
+    sed -i "s/^$u:.*/$u:$pass:$new_expire_date:$limit:$bw/" "$DB_FILE"
     echo -e "\n${C_GREEN}✅ User '$u' has been renewed. New expiration date is ${C_YELLOW}${new_expire_date}${C_RESET}."
 }
 
@@ -791,7 +1086,7 @@ cleanup_expired() {
         return
     fi
     
-    while IFS=: read -r user pass expiry limit; do
+    while IFS=: read -r user pass expiry limit bandwidth_gb _extra; do
         local expiry_ts
         expiry_ts=$(date -d "$expiry" +%s 2>/dev/null || echo 0)
         
@@ -812,10 +1107,14 @@ cleanup_expired() {
         for user in "${expired_users[@]}"; do
             echo " - Deleting ${C_YELLOW}$user...${C_RESET}"
             killall -u "$user" -9 &>/dev/null
+            # Clean up bandwidth tracking
+            rm -f "$BANDWIDTH_DIR/${user}.usage"
+            rm -rf "$BANDWIDTH_DIR/pidtrack/${user}"
             userdel -r "$user" &>/dev/null
             sed -i "/^$user:/d" "$DB_FILE"
         done
         echo -e "\n${C_GREEN}✅ Expired users have been cleaned up.${C_RESET}"
+        update_ssh_banners_config
     else
         echo -e "\n${C_YELLOW}❌ Cleanup cancelled.${C_RESET}"
     fi
@@ -894,6 +1193,7 @@ restore_user_data() {
         if ! id "$user" &>/dev/null; then
             echo " - User does not exist in system. Creating..."
             useradd -m -s /usr/sbin/nologin "$user"
+            usermod -aG ffusers "$user" 2>/dev/null
         fi
         echo " - Setting password..."
         echo "$user:$pass" | chpasswd
@@ -903,6 +1203,8 @@ restore_user_data() {
     done < "$DB_FILE"
     rm -rf "$temp_dir"
     echo -e "\n${C_GREEN}✅ SUCCESS: User data restore completed.${C_RESET}"
+    
+    update_ssh_banners_config
 }
 
 _enable_banner_in_sshd_config() {
@@ -1584,10 +1886,10 @@ uninstall_dnstt() {
 
 install_falcon_proxy() {
     clear; show_banner
-    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Proxy (Websockets/Socks) ---${C_RESET}"
+    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Websockets Proxy ---${C_RESET}"
     
     if [ -f "$FALCONPROXY_SERVICE_FILE" ]; then
-        echo -e "\n${C_YELLOW}ℹ️ Channel404 Proxy is already installed.${C_RESET}"
+        echo -e "\n${C_YELLOW}ℹ️ Websockets Proxy is already installed.${C_RESET}"
         if [ -f "$FALCONPROXY_CONFIG_FILE" ]; then
             source "$FALCONPROXY_CONFIG_FILE"
             echo -e "   It is configured to run on port(s): ${C_YELLOW}$PORTS${C_RESET}"
@@ -1598,7 +1900,7 @@ install_falcon_proxy() {
     fi
 
     echo -e "\n${C_BLUE}🌐 Fetching available versions from GitHub...${C_RESET}"
-    local releases_json=$(curl -s "https://api.github.com/repos/nyeinkokoaung404/channel404-manager/releases")
+    local releases_json=$(curl -s "https://api.github.com/repos/firewallfalcons/FirewallFalcon-Manager/releases")
     if [[ -z "$releases_json" || "$releases_json" == "[]" ]]; then
         echo -e "${C_RED}❌ Error: Could not fetch releases. Check internet or API limits.${C_RESET}"
         return
@@ -1620,7 +1922,7 @@ install_falcon_proxy() {
     
     local choice
     while true; do
-        read -p "👉 Enter version number [3]: " choice
+        read -p "👉 Enter version number [1]: " choice
         choice=${choice:-1}
         if [[ "$choice" == "0" ]]; then return; fi
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -le "${#versions[@]}" ]; then
@@ -1632,7 +1934,7 @@ install_falcon_proxy() {
     done
 
     local ports
-    read -p "👉 Enter port(s) for Websocket Proxy (e.g., 8080 or 8080 8888) [8080]: " ports
+    read -p "👉 Enter port(s) for Websockets Proxy (e.g., 8080 or 8080 8888) [8080]: " ports
     ports=${ports:-8080}
 
     local port_array=($ports)
@@ -1655,14 +1957,14 @@ install_falcon_proxy() {
         binary_name="falconproxyarm"
         echo -e "${C_BLUE}ℹ️ Detected ARM64 architecture.${C_RESET}"
     else
-        echo -e "\n${C_RED}❌ Unsupported architecture: $arch. Cannot install Websocket Proxy.${C_RESET}"
+        echo -e "\n${C_RED}❌ Unsupported architecture: $arch. Cannot install Websockets Proxy.${C_RESET}"
         return
     fi
     
     # Construct download URL based on selected version
-    local download_url="https://github.com/nyeinkokoaung404/channel404-manager/releases/download/$SELECTED_VERSION/$binary_name"
+    local download_url="https://github.com/firewallfalcons/FirewallFalcon-Manager/releases/download/$SELECTED_VERSION/$binary_name"
 
-    echo -e "\n${C_GREEN}📥 Downloading Websocket Proxy $SELECTED_VERSION ($binary_name)...${C_RESET}"
+    echo -e "\n${C_GREEN}📥 Downloading 404 Proxy $SELECTED_VERSION ($binary_name)...${C_RESET}"
     wget -q --show-progress -O "$FALCONPROXY_BINARY" "$download_url"
     if [ $? -ne 0 ]; then
         echo -e "\n${C_RED}❌ Failed to download the binary. Please ensure version $SELECTED_VERSION has asset '$binary_name'.${C_RESET}"
@@ -1693,29 +1995,29 @@ PORTS="$ports"
 INSTALLED_VERSION="$SELECTED_VERSION"
 EOF
 
-    echo -e "\n${C_GREEN}▶️ Enabling and starting Websocket Proxy service...${C_RESET}"
+    echo -e "\n${C_GREEN}▶️ Enabling and starting Websockets Proxy service...${C_RESET}"
     systemctl daemon-reload
     systemctl enable falconproxy.service
     systemctl restart falconproxy.service
     sleep 2
     
     if systemctl is-active --quiet falconproxy; then
-        echo -e "\n${C_GREEN}✅ SUCCESS: Websocket Proxy $SELECTED_VERSION is installed and active.${C_RESET}"
+        echo -e "\n${C_GREEN}✅ SUCCESS: Websockets Proxy $SELECTED_VERSION is installed and active.${C_RESET}"
         echo -e "   Listening on port(s): ${C_YELLOW}$ports${C_RESET}"
     else
-        echo -e "\n${C_RED}❌ ERROR: Websocket Proxy service failed to start.${C_RESET}"
+        echo -e "\n${C_RED}❌ ERROR: Websockets Proxy service failed to start.${C_RESET}"
         echo -e "${C_YELLOW}ℹ️ Displaying last 15 lines of the service log for diagnostics:${C_RESET}"
         journalctl -u falconproxy.service -n 15 --no-pager
     fi
 }
 
 uninstall_falcon_proxy() {
-    echo -e "\n${C_BOLD}${C_PURPLE}--- 🗑️ Uninstalling Websocket Proxy ---${C_RESET}"
+    echo -e "\n${C_BOLD}${C_PURPLE}--- 🗑️ Uninstalling Websockets Proxy ---${C_RESET}"
     if [ ! -f "$FALCONPROXY_SERVICE_FILE" ]; then
-        echo -e "${C_YELLOW}ℹ️ Websocket Proxy is not installed, skipping.${C_RESET}"
+        echo -e "${C_YELLOW}ℹ️ Websockets Proxy is not installed, skipping.${C_RESET}"
         return
     fi
-    echo -e "${C_GREEN}🛑 Stopping and disabling Websocket Proxy service...${C_RESET}"
+    echo -e "${C_GREEN}🛑 Stopping and disabling Websockets Proxy service...${C_RESET}"
     systemctl stop falconproxy.service >/dev/null 2>&1
     systemctl disable falconproxy.service >/dev/null 2>&1
     echo -e "${C_GREEN}🗑️ Removing service file...${C_RESET}"
@@ -1724,7 +2026,7 @@ uninstall_falcon_proxy() {
     echo -e "${C_GREEN}🗑️ Removing binary and config files...${C_RESET}"
     rm -f "$FALCONPROXY_BINARY"
     rm -f "$FALCONPROXY_CONFIG_FILE"
-    echo -e "${C_GREEN}✅ Websocket Proxy has been uninstalled successfully.${C_RESET}"
+    echo -e "${C_GREEN}✅ Websockets Proxy has been uninstalled successfully.${C_RESET}"
 }
 
 # --- ZiVPN Installation Logic ---
@@ -2366,8 +2668,8 @@ protocol_menu() {
         printf "     ${C_CHOICE}[ 6]${C_RESET} %-45s\n" "🗑️ Uninstall SSL Tunnel"
         printf "     ${C_CHOICE}[ 7]${C_RESET} %-45s %s\n" "📡 Install/View DNSTT (Port 53)" "$dnstt_status"
         printf "     ${C_CHOICE}[ 8]${C_RESET} %-45s\n" "🗑️ Uninstall DNSTT"
-        printf "     ${C_CHOICE}[ 9]${C_RESET} %-45s %s\n" "🦅 Install Websocket/Proxy (Select Version)" "$falconproxy_status"
-        printf "     ${C_CHOICE}[10]${C_RESET} %-45s\n" "🗑️ Uninstall Websocket/Proxy"
+        printf "     ${C_CHOICE}[ 9]${C_RESET} %-45s %s\n" "🦅 Install Falcon Proxy (Select Version)" "$falconproxy_status"
+        printf "     ${C_CHOICE}[10]${C_RESET} %-45s\n" "🗑️ Uninstall Falcon Proxy"
         printf "     ${C_CHOICE}[11]${C_RESET} %-45s %s\n" "🌐 Install/Manage Nginx Proxy (80/443)" "$nginx_status"
         printf "     ${C_CHOICE}[16]${C_RESET} %-45s %s\n" "🛡️ Install ZiVPN (UDP 5667)" "$zivpn_status"
         printf "     ${C_CHOICE}[17]${C_RESET} %-45s\n" "🗑️ Uninstall ZiVPN"
@@ -2521,6 +2823,18 @@ uninstall_script() {
     rm -f "$LIMITER_SERVICE"
     rm -f "$LIMITER_SCRIPT"
     
+    echo -e "\n${C_BLUE}🗑️ Removing bandwidth monitoring service...${C_RESET}"
+    systemctl stop firewallfalcon-bandwidth &>/dev/null
+    systemctl disable firewallfalcon-bandwidth &>/dev/null
+    rm -f "$BANDWIDTH_SERVICE"
+    rm -f "$BANDWIDTH_SCRIPT"
+    rm -f "$TRIAL_CLEANUP_SCRIPT"
+    
+    echo -e "\n${C_BLUE}\ud83d\uddd1\ufe0f Removing SSH login banner...${C_RESET}"
+    rm -f "$LOGIN_INFO_SCRIPT"
+    rm -f "$SSHD_FF_CONFIG"
+    systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null
+    
     chattr -i /etc/resolv.conf &>/dev/null
 
     purge_nginx "silent"
@@ -2550,6 +2864,246 @@ uninstall_script() {
 }
 
 # --- NEW FEATURES ---
+
+create_trial_account() {
+    clear; show_banner
+    echo -e "${C_BOLD}${C_PURPLE}--- ⏱️ Create Trial/Test Account ---${C_RESET}"
+    
+    # Ensure 'at' daemon is available
+    if ! command -v at &>/dev/null; then
+        echo -e "${C_YELLOW}⚠️ 'at' command not found. Installing...${C_RESET}"
+        apt-get update > /dev/null 2>&1 && apt-get install -y at || {
+            echo -e "${C_RED}❌ Failed to install 'at'. Cannot schedule auto-expiry.${C_RESET}"
+            return
+        }
+        systemctl enable atd &>/dev/null
+        systemctl start atd &>/dev/null
+    fi
+    
+    # Ensure atd is running
+    if ! systemctl is-active --quiet atd; then
+        systemctl start atd &>/dev/null
+    fi
+    
+    echo -e "\n${C_CYAN}Select trial duration:${C_RESET}\n"
+    printf "  ${C_GREEN}[ 1]${C_RESET} ⏱️  1 Hour\n"
+    printf "  ${C_GREEN}[ 2]${C_RESET} ⏱️  2 Hours\n"
+    printf "  ${C_GREEN}[ 3]${C_RESET} ⏱️  3 Hours\n"
+    printf "  ${C_GREEN}[ 4]${C_RESET} ⏱️  6 Hours\n"
+    printf "  ${C_GREEN}[ 5]${C_RESET} ⏱️  12 Hours\n"
+    printf "  ${C_GREEN}[ 6]${C_RESET} 📅  1 Day\n"
+    printf "  ${C_GREEN}[ 7]${C_RESET} 📅  3 Days\n"
+    printf "  ${C_GREEN}[ 8]${C_RESET} ⚙️  Custom (enter hours)\n"
+    echo -e "\n  ${C_RED}[ 0]${C_RESET} ↩️ Cancel"
+    echo
+    read -p "👉 Select duration: " dur_choice
+    
+    local duration_hours=0
+    local duration_label=""
+    case $dur_choice in
+        1) duration_hours=1;   duration_label="1 Hour" ;;
+        2) duration_hours=2;   duration_label="2 Hours" ;;
+        3) duration_hours=3;   duration_label="3 Hours" ;;
+        4) duration_hours=6;   duration_label="6 Hours" ;;
+        5) duration_hours=12;  duration_label="12 Hours" ;;
+        6) duration_hours=24;  duration_label="1 Day" ;;
+        7) duration_hours=72;  duration_label="3 Days" ;;
+        8) read -p "👉 Enter custom duration in hours: " custom_hours
+           if ! [[ "$custom_hours" =~ ^[0-9]+$ ]] || [[ "$custom_hours" -lt 1 ]]; then
+               echo -e "\n${C_RED}❌ Invalid number of hours.${C_RESET}"; return
+           fi
+           duration_hours=$custom_hours
+           duration_label="$custom_hours Hours"
+           ;;
+        0) echo -e "\n${C_YELLOW}❌ Cancelled.${C_RESET}"; return ;;
+        *) echo -e "\n${C_RED}❌ Invalid option.${C_RESET}"; return ;;
+    esac
+    
+    # Username
+    local rand_suffix=$(head /dev/urandom | tr -dc 'a-z0-9' | head -c 5)
+    local default_username="trial_${rand_suffix}"
+    read -p "👤 Username [${default_username}]: " username
+    username=${username:-$default_username}
+    
+    if id "$username" &>/dev/null || grep -q "^$username:" "$DB_FILE"; then
+        echo -e "\n${C_RED}❌ Error: User '$username' already exists.${C_RESET}"; return
+    fi
+    
+    # Password
+    local password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+    read -p "🔑 Password [${password}]: " custom_pass
+    password=${custom_pass:-$password}
+    
+    # Connection limit
+    read -p "📶 Connection limit [1]: " limit
+    limit=${limit:-1}
+    if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    
+    # Bandwidth limit
+    read -p "📦 Bandwidth limit in GB (0 = unlimited) [0]: " bandwidth_gb
+    bandwidth_gb=${bandwidth_gb:-0}
+    if ! [[ "$bandwidth_gb" =~ ^[0-9]+\.?[0-9]*$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    
+    # Calculate expiry
+    local expire_date
+    if [[ "$duration_hours" -ge 24 ]]; then
+        local days=$((duration_hours / 24))
+        expire_date=$(date -d "+$days days" +%Y-%m-%d)
+    else
+        # For sub-day durations, set expiry to tomorrow to be safe (at job does the real cleanup)
+        expire_date=$(date -d "+1 day" +%Y-%m-%d)
+    fi
+    local expiry_timestamp
+    expiry_timestamp=$(date -d "+${duration_hours} hours" '+%Y-%m-%d %H:%M:%S')
+    
+    # Create the system user
+    useradd -m -s /usr/sbin/nologin "$username"
+    usermod -aG ffusers "$username" 2>/dev/null
+    echo "$username:$password" | chpasswd
+    chage -E "$expire_date" "$username"
+    echo "$username:$password:$expire_date:$limit:$bandwidth_gb" >> "$DB_FILE"
+    
+    # Schedule auto-cleanup via 'at'
+    echo "$TRIAL_CLEANUP_SCRIPT $username" | at now + ${duration_hours} hours 2>/dev/null
+    
+    local bw_display="Unlimited"
+    if [[ "$bandwidth_gb" != "0" ]]; then bw_display="${bandwidth_gb} GB"; fi
+    
+    clear; show_banner
+    echo -e "${C_GREEN}✅ Trial account created successfully!${C_RESET}\n"
+    echo -e "${C_YELLOW}========================================${C_RESET}"
+    echo -e "  ⏱️  ${C_BOLD}TRIAL ACCOUNT${C_RESET}"
+    echo -e "${C_YELLOW}========================================${C_RESET}"
+    echo -e "  - 👤 Username:          ${C_YELLOW}$username${C_RESET}"
+    echo -e "  - 🔑 Password:          ${C_YELLOW}$password${C_RESET}"
+    echo -e "  - ⏱️ Duration:          ${C_CYAN}$duration_label${C_RESET}"
+    echo -e "  - 🕐 Auto-expires at:   ${C_RED}$expiry_timestamp${C_RESET}"
+    echo -e "  - 📶 Connection Limit:  ${C_YELLOW}$limit${C_RESET}"
+    echo -e "  - 📦 Bandwidth Limit:   ${C_YELLOW}$bw_display${C_RESET}"
+    echo -e "${C_YELLOW}========================================${C_RESET}"
+    echo -e "\n${C_DIM}The account will be automatically deleted when the trial expires.${C_RESET}"
+    
+    # Auto-ask for config generation
+    echo
+    read -p "👉 Generate client config for this trial user? (y/n): " gen_conf
+    if [[ "$gen_conf" == "y" || "$gen_conf" == "Y" ]]; then
+        generate_client_config "$username" "$password"
+    fi
+    
+    update_ssh_banners_config
+}
+
+view_user_bandwidth() {
+    _select_user_interface "--- 📊 View User Bandwidth ---"
+    local u=$SELECTED_USER
+    if [[ "$u" == "NO_USERS" || -z "$u" ]]; then return; fi
+    
+    clear; show_banner
+    echo -e "${C_BOLD}${C_PURPLE}--- 📊 Bandwidth Details: ${C_YELLOW}$u${C_PURPLE} ---${C_RESET}\n"
+    
+    local line; line=$(grep "^$u:" "$DB_FILE")
+    local bandwidth_gb; bandwidth_gb=$(echo "$line" | cut -d: -f5)
+    [[ -z "$bandwidth_gb" ]] && bandwidth_gb="0"
+    
+    local used_bytes=0
+    if [[ -f "$BANDWIDTH_DIR/${u}.usage" ]]; then
+        used_bytes=$(cat "$BANDWIDTH_DIR/${u}.usage" 2>/dev/null)
+        [[ -z "$used_bytes" ]] && used_bytes=0
+    fi
+    
+    local used_mb; used_mb=$(awk "BEGIN {printf \"%.2f\", $used_bytes / 1048576}")
+    local used_gb; used_gb=$(awk "BEGIN {printf \"%.3f\", $used_bytes / 1073741824}")
+    
+    echo -e "  ${C_CYAN}Data Used:${C_RESET}        ${C_WHITE}${used_gb} GB${C_RESET} (${used_mb} MB)"
+    
+    if [[ "$bandwidth_gb" == "0" ]]; then
+        echo -e "  ${C_CYAN}Bandwidth Limit:${C_RESET}  ${C_GREEN}Unlimited${C_RESET}"
+        echo -e "  ${C_CYAN}Status:${C_RESET}           ${C_GREEN}No quota restrictions${C_RESET}"
+    else
+        local quota_bytes; quota_bytes=$(awk "BEGIN {printf \"%.0f\", $bandwidth_gb * 1073741824}")
+        local percentage; percentage=$(awk "BEGIN {printf \"%.1f\", ($used_bytes / $quota_bytes) * 100}")
+        local remaining_bytes; remaining_bytes=$((quota_bytes - used_bytes))
+        if [[ "$remaining_bytes" -lt 0 ]]; then remaining_bytes=0; fi
+        local remaining_gb; remaining_gb=$(awk "BEGIN {printf \"%.3f\", $remaining_bytes / 1073741824}")
+        
+        echo -e "  ${C_CYAN}Bandwidth Limit:${C_RESET}  ${C_YELLOW}${bandwidth_gb} GB${C_RESET}"
+        echo -e "  ${C_CYAN}Remaining:${C_RESET}        ${C_WHITE}${remaining_gb} GB${C_RESET}"
+        echo -e "  ${C_CYAN}Usage:${C_RESET}            ${C_WHITE}${percentage}%${C_RESET}"
+        
+        # Progress bar
+        local bar_width=30
+        local filled; filled=$(awk "BEGIN {printf \"%.0f\", ($percentage / 100) * $bar_width}")
+        if [[ "$filled" -gt "$bar_width" ]]; then filled=$bar_width; fi
+        local empty=$((bar_width - filled))
+        local bar_color="$C_GREEN"
+        if (( $(awk "BEGIN {print ($percentage > 80)}" ) )); then bar_color="$C_RED"
+        elif (( $(awk "BEGIN {print ($percentage > 50)}" ) )); then bar_color="$C_YELLOW"
+        fi
+        printf "  ${C_CYAN}Progress:${C_RESET}         ${bar_color}["
+        for ((i=0; i<filled; i++)); do printf "█"; done
+        for ((i=0; i<empty; i++)); do printf "░"; done
+        printf "]${C_RESET} ${percentage}%%\n"
+        
+        if [[ "$used_bytes" -ge "$quota_bytes" ]]; then
+            echo -e "\n  ${C_RED}⚠️ USER HAS EXCEEDED BANDWIDTH QUOTA — ACCOUNT LOCKED${C_RESET}"
+        fi
+    fi
+}
+
+bulk_create_users() {
+    clear; show_banner
+    echo -e "${C_BOLD}${C_PURPLE}--- 👥 Bulk Create Users ---${C_RESET}"
+    
+    read -p "👉 Enter username prefix (e.g., 'user'): " prefix
+    if [[ -z "$prefix" ]]; then echo -e "\n${C_RED}❌ Prefix cannot be empty.${C_RESET}"; return; fi
+    
+    read -p "🔢 How many users to create? " count
+    if ! [[ "$count" =~ ^[0-9]+$ ]] || [[ "$count" -lt 1 ]] || [[ "$count" -gt 100 ]]; then
+        echo -e "\n${C_RED}❌ Invalid count (1-100).${C_RESET}"; return
+    fi
+    
+    read -p "🗓️ Account duration (in days): " days
+    if ! [[ "$days" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    
+    read -p "📶 Connection limit per user [1]: " limit
+    limit=${limit:-1}
+    if ! [[ "$limit" =~ ^[0-9]+$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    
+    read -p "📦 Bandwidth limit in GB per user (0 = unlimited) [0]: " bandwidth_gb
+    bandwidth_gb=${bandwidth_gb:-0}
+    if ! [[ "$bandwidth_gb" =~ ^[0-9]+\.?[0-9]*$ ]]; then echo -e "\n${C_RED}❌ Invalid number.${C_RESET}"; return; fi
+    
+    local expire_date
+    expire_date=$(date -d "+$days days" +%Y-%m-%d)
+    local bw_display="Unlimited"; [[ "$bandwidth_gb" != "0" ]] && bw_display="${bandwidth_gb} GB"
+    
+    echo -e "\n${C_BLUE}⚙️ Creating $count users with prefix '${prefix}'...${C_RESET}\n"
+    echo -e "${C_YELLOW}================================================================${C_RESET}"
+    printf "${C_BOLD}${C_WHITE}%-20s | %-15s | %-12s${C_RESET}\n" "USERNAME" "PASSWORD" "EXPIRES"
+    echo -e "${C_YELLOW}----------------------------------------------------------------${C_RESET}"
+    
+    local created=0
+    for ((i=1; i<=count; i++)); do
+        local username="${prefix}${i}"
+        if id "$username" &>/dev/null || grep -q "^$username:" "$DB_FILE"; then
+            echo -e "${C_RED}  ⚠️ Skipping '$username' — already exists${C_RESET}"
+            continue
+        fi
+        local password=$(head /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 8)
+        useradd -m -s /usr/sbin/nologin "$username"
+        usermod -aG ffusers "$username" 2>/dev/null
+        echo "$username:$password" | chpasswd
+        chage -E "$expire_date" "$username"
+        echo "$username:$password:$expire_date:$limit:$bandwidth_gb" >> "$DB_FILE"
+        printf "  ${C_GREEN}%-20s${C_RESET} | ${C_YELLOW}%-15s${C_RESET} | ${C_CYAN}%-12s${C_RESET}\n" "$username" "$password" "$expire_date"
+        created=$((created + 1))
+    done
+    
+    echo -e "${C_YELLOW}================================================================${C_RESET}"
+    echo -e "\n${C_GREEN}✅ Created $created users. Conn Limit: ${limit} | BW: ${bw_display}${C_RESET}"
+    
+    update_ssh_banners_config
+}
 
 generate_client_config() {
     local user=$1
@@ -2582,7 +3136,7 @@ generate_client_config() {
     echo -e "\n🔹 ${C_BOLD}SSH Direct${C_RESET}:"
     echo -e "   • Host: $host_domain"
     echo -e "   • Port: 22"
-    echo -e "   • Payload: (Standard SSH)"
+    echo -e "   • payload: (Standard SSH)"
 
     # 2. SSL/TLS Tunnel (HAProxy or Nginx)
     local ssl_port=""
@@ -2847,6 +3401,78 @@ _flush_torrent_rules() {
     iptables -D OUTPUT -m string --string "find_node" --algo bm -j DROP 2>/dev/null
 }
 
+ssh_banner_menu() {
+    clear; show_banner
+    echo -e "${C_BOLD}${C_PURPLE}--- 🎨 SSH Login Banner ---${C_RESET}"
+    
+    echo -e "\n${C_CYAN}When enabled, users connecting via SSH tunnel (HTTP Custom,"
+    echo -e "HTTP Injector, etc.) will see their account details:${C_RESET}"
+    echo -e "  • Days/hours remaining"
+    echo -e "  • Bandwidth used and remaining"
+    echo -e "  • Active sessions count"
+    
+    # Check current status
+    if [[ -f "$SSHD_FF_CONFIG" ]]; then
+        echo -e "\n  Status: ${C_GREEN}✅ ENABLED${C_RESET}"
+    else
+        echo -e "\n  Status: ${C_RED}❌ DISABLED${C_RESET}"
+    fi
+    
+    echo -e "\n${C_BOLD}Options:${C_RESET}\n"
+    printf "  ${C_CHOICE}[ 1]${C_RESET} %-35s\n" "✅ Enable Login Banner"
+    printf "  ${C_CHOICE}[ 2]${C_RESET} %-35s\n" "❌ Disable Login Banner"
+    printf "  ${C_CHOICE}[ 3]${C_RESET} %-35s\n" "📝 Preview Banner (test with a user)"
+    echo -e "\n  ${C_WARN}[ 0]${C_RESET} ↩️ Return"
+    echo
+    read -p "👉 Enter choice: " banner_choice
+    case $banner_choice in
+        1)
+            touch "/etc/firewallfalcon/banners_enabled"
+            update_ssh_banners_config
+            echo -e "\n${C_GREEN}✅ SSH Login Banner has been enabled!${C_RESET}"
+            echo -e "${C_DIM}Users will see account info when they connect via SSH tunnel.${C_RESET}"
+            press_enter
+            ;;
+        2)
+            rm -f "/etc/firewallfalcon/banners_enabled"
+            update_ssh_banners_config
+            echo -e "\n${C_YELLOW}❌ SSH Login Banner has been disabled.${C_RESET}"
+            press_enter
+            ;;
+        3)
+            # Force background service to regenerate to ensure the syntax error fix is applied
+            # even if the user didn't run the --install-setup command!
+            echo -e "${C_DIM}Re-syncing background limiter service...${C_RESET}"
+            setup_limiter_service >/dev/null 2>&1
+            
+            if [[ ! -f "/etc/firewallfalcon/banners_enabled" ]]; then
+                echo -e "\n${C_RED}❌ You must ENABLE the Login Banner (Option 1) before you can preview it!${C_RESET}"
+                echo -e "${C_YELLOW}The service only generates these files while the feature is active.${C_RESET}"
+                press_enter
+                return
+            fi
+            _select_user_interface "--- 📝 Preview Login Banner ---"
+            local u=$SELECTED_USER
+            if [[ -z "$u" || "$u" == "NO_USERS" ]]; then return; fi
+            echo -e "\n${C_CYAN}--- Banner Preview for user '$u' ---${C_RESET}\n"
+            if [[ -f "/etc/firewallfalcon/banners/${u}.txt" ]]; then
+                cat "/etc/firewallfalcon/banners/${u}.txt"
+            else
+                echo -e "${C_RED}Banner file not generated yet. Waiting up to 15s for limiter to write it...${C_RESET}"
+                sleep 5
+                if ! cat "/etc/firewallfalcon/banners/${u}.txt" 2>/dev/null; then
+                    echo -e "\n${C_RED}Still not generated. The limiter service MUST be crashing! Here is the error log:${C_RESET}"
+                    echo -e "----------------------------------------------------------------------"
+                    journalctl -u firewallfalcon-limiter -n 15 --no-pager
+                    echo -e "----------------------------------------------------------------------"
+                fi
+            fi
+            press_enter
+            ;;
+        *) return ;;
+    esac
+}
+
 auto_reboot_menu() {
     clear; show_banner
     echo -e "${C_BOLD}${C_PURPLE}--- 🔄 Auto-Reboot Management ---${C_RESET}"
@@ -2900,21 +3526,23 @@ main_menu() {
         
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}👤 USER MANAGEMENT ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "1" "Create New User" "5" "Unlock User Account"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "2" "Delete User" "6" "Edit User Details"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "3" "Renew User Account" "7" "List Managed Users"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "4" "Lock User Account" "8" "Generate Client Config"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "1" "✨ Create New User" "6" "✏️  Edit User Details"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "2" "🗑️  Delete User" "7" "📋 List Managed Users"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "3" "🔄 Renew User Account" "8" "📱 Generate Client Config"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "4" "🔒 Lock User Account" "9" "⏱️  Create Trial Account"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "5" "🔓 Unlock User Account" "10" "📊 View User Bandwidth"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "11" "👥 Bulk Create Users"
         
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}🌐 VPN & PROTOCOLS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "9" "Protocol Manager" "11" "Traffic Monitor (Lite)"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "10" "DT Proxy Manager" "12" "Block Torrent (Anti-P2P)"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "12" "🔌 Protocol Manager" "14" "📈 Traffic Monitor (Lite)"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "13" "🔗 DT Proxy Manager" "15" "🚫 Block Torrent (Anti-P2P)"
 
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}⚙️ SYSTEM SETTINGS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "13" "CloudFlare Free Domain" "16" "Backup User Data"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "14" "SSH Banner Config" "17" "Restore User Data"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-25s ${C_CHOICE}[%2s]${C_RESET} %-25s\n" "15" "Auto-Reboot Task" "18" "Cleanup Expired Users"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "16" "☁️  CloudFlare Free Domain" "19" "💾 Backup User Data"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "17" "🎨 SSH Banner Config" "20" "📥 Restore User Data"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "18" "🔄 Auto-Reboot Task" "21" "🧹 Cleanup Expired Users"
 
         echo
         echo -e "   ${C_DANGER}═══════════════════[ ${C_BOLD}🔥 DANGER ZONE ${C_RESET}${C_DANGER}]═══════════════════${C_RESET}"
@@ -2930,18 +3558,21 @@ main_menu() {
             6) edit_user; press_enter ;;
             7) list_users; press_enter ;;
             8) client_config_menu; press_enter ;;
+            9) create_trial_account; press_enter ;;
+            10) view_user_bandwidth; press_enter ;;
+            11) bulk_create_users; press_enter ;;
             
-            9) protocol_menu ;;
-            10) dt_proxy_menu ;;
-            11) traffic_monitor_menu ;;
-            12) torrent_block_menu ;;
+            12) protocol_menu ;;
+            13) dt_proxy_menu ;;
+            14) traffic_monitor_menu ;;
+            15) torrent_block_menu ;;
             
-            13) dns_menu; press_enter ;;
-            14) ssh_banner_menu ;;
-            15) auto_reboot_menu ;;
-            16) backup_user_data; press_enter ;;
-            17) restore_user_data; press_enter ;;
-            18) cleanup_expired; press_enter ;;
+            16) dns_menu; press_enter ;;
+            17) ssh_banner_menu ;;
+            18) auto_reboot_menu ;;
+            19) backup_user_data; press_enter ;;
+            20) restore_user_data; press_enter ;;
+            21) cleanup_expired; press_enter ;;
             
             99) uninstall_script ;;
             0) exit 0 ;;

@@ -1886,10 +1886,10 @@ uninstall_dnstt() {
 
 install_falcon_proxy() {
     clear; show_banner
-    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Falcon Proxy (Websockets/Socks) ---${C_RESET}"
+    echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Websockets Proxy ---${C_RESET}"
     
     if [ -f "$FALCONPROXY_SERVICE_FILE" ]; then
-        echo -e "\n${C_YELLOW}ℹ️ Falcon Proxy is already installed.${C_RESET}"
+        echo -e "\n${C_YELLOW}ℹ️ 404 Proxy is already installed.${C_RESET}"
         if [ -f "$FALCONPROXY_CONFIG_FILE" ]; then
             source "$FALCONPROXY_CONFIG_FILE"
             echo -e "   It is configured to run on port(s): ${C_YELLOW}$PORTS${C_RESET}"
@@ -1918,7 +1918,7 @@ install_falcon_proxy() {
     for i in "${!versions[@]}"; do
         printf "  ${C_GREEN}[%2d]${C_RESET} %s\n" "$((i+1))" "${versions[$i]}"
     done
-    echo -e "  ${C_RED} [ 0]${C_RESET} ↩️ Cancel"
+    echo -e "  ${C_RED}[ 0]${C_RESET} ↩️ Cancel"
     
     local choice
     while true; do
@@ -1934,7 +1934,7 @@ install_falcon_proxy() {
     done
 
     local ports
-    read -p "👉 Enter port(s) for Falcon Proxy (e.g., 8080 or 8080 8888) [8080]: " ports
+    read -p "👉 Enter port(s) for Websockets Proxy (e.g., 8080 or 8080 8888) [8080]: " ports
     ports=${ports:-8080}
 
     local port_array=($ports)
@@ -1957,14 +1957,14 @@ install_falcon_proxy() {
         binary_name="falconproxyarm"
         echo -e "${C_BLUE}ℹ️ Detected ARM64 architecture.${C_RESET}"
     else
-        echo -e "\n${C_RED}❌ Unsupported architecture: $arch. Cannot install Falcon Proxy.${C_RESET}"
+        echo -e "\n${C_RED}❌ Unsupported architecture: $arch. Cannot install Websockets Proxy.${C_RESET}"
         return
     fi
     
     # Construct download URL based on selected version
     local download_url="https://github.com/firewallfalcons/FirewallFalcon-Manager/releases/download/$SELECTED_VERSION/$binary_name"
 
-    echo -e "\n${C_GREEN}📥 Downloading Falcon Proxy $SELECTED_VERSION ($binary_name)...${C_RESET}"
+    echo -e "\n${C_GREEN}📥 Downloading 404 Proxy $SELECTED_VERSION ($binary_name)...${C_RESET}"
     wget -q --show-progress -O "$FALCONPROXY_BINARY" "$download_url"
     if [ $? -ne 0 ]; then
         echo -e "\n${C_RED}❌ Failed to download the binary. Please ensure version $SELECTED_VERSION has asset '$binary_name'.${C_RESET}"
@@ -1995,29 +1995,29 @@ PORTS="$ports"
 INSTALLED_VERSION="$SELECTED_VERSION"
 EOF
 
-    echo -e "\n${C_GREEN}▶️ Enabling and starting Falcon Proxy service...${C_RESET}"
+    echo -e "\n${C_GREEN}▶️ Enabling and starting Websockets Proxy service...${C_RESET}"
     systemctl daemon-reload
     systemctl enable falconproxy.service
     systemctl restart falconproxy.service
     sleep 2
     
     if systemctl is-active --quiet falconproxy; then
-        echo -e "\n${C_GREEN}✅ SUCCESS: Falcon Proxy $SELECTED_VERSION is installed and active.${C_RESET}"
+        echo -e "\n${C_GREEN}✅ SUCCESS: Websockets Proxy $SELECTED_VERSION is installed and active.${C_RESET}"
         echo -e "   Listening on port(s): ${C_YELLOW}$ports${C_RESET}"
     else
-        echo -e "\n${C_RED}❌ ERROR: Falcon Proxy service failed to start.${C_RESET}"
+        echo -e "\n${C_RED}❌ ERROR: Websockets Proxy service failed to start.${C_RESET}"
         echo -e "${C_YELLOW}ℹ️ Displaying last 15 lines of the service log for diagnostics:${C_RESET}"
         journalctl -u falconproxy.service -n 15 --no-pager
     fi
 }
 
 uninstall_falcon_proxy() {
-    echo -e "\n${C_BOLD}${C_PURPLE}--- 🗑️ Uninstalling Falcon Proxy ---${C_RESET}"
+    echo -e "\n${C_BOLD}${C_PURPLE}--- 🗑️ Uninstalling Websockets Proxy ---${C_RESET}"
     if [ ! -f "$FALCONPROXY_SERVICE_FILE" ]; then
-        echo -e "${C_YELLOW}ℹ️ Falcon Proxy is not installed, skipping.${C_RESET}"
+        echo -e "${C_YELLOW}ℹ️ Websockets Proxy is not installed, skipping.${C_RESET}"
         return
     fi
-    echo -e "${C_GREEN}🛑 Stopping and disabling Falcon Proxy service...${C_RESET}"
+    echo -e "${C_GREEN}🛑 Stopping and disabling Websockets Proxy service...${C_RESET}"
     systemctl stop falconproxy.service >/dev/null 2>&1
     systemctl disable falconproxy.service >/dev/null 2>&1
     echo -e "${C_GREEN}🗑️ Removing service file...${C_RESET}"
@@ -2026,7 +2026,7 @@ uninstall_falcon_proxy() {
     echo -e "${C_GREEN}🗑️ Removing binary and config files...${C_RESET}"
     rm -f "$FALCONPROXY_BINARY"
     rm -f "$FALCONPROXY_CONFIG_FILE"
-    echo -e "${C_GREEN}✅ Falcon Proxy has been uninstalled successfully.${C_RESET}"
+    echo -e "${C_GREEN}✅ Websockets Proxy has been uninstalled successfully.${C_RESET}"
 }
 
 # --- ZiVPN Installation Logic ---

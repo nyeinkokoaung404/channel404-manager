@@ -66,7 +66,7 @@ ZIVPN_CONFIG_FILE="$ZIVPN_DIR/config.json"
 ZIVPN_CERT_FILE="$ZIVPN_DIR/zivpn.crt"
 ZIVPN_KEY_FILE="$ZIVPN_DIR/zivpn.key"
 
-DESEC_TOKEN="7g7Hnzqtyda2xUqNUwfEhpysJAPv"
+DESEC_TOKEN="iEJiTqzmhQbmMDnnwg4Q4ajo7hHL"
 DESEC_DOMAIN="channel404.manager.qzz.io"
 
 SELECTED_USER=""
@@ -1889,7 +1889,7 @@ install_falcon_proxy() {
     echo -e "${C_BOLD}${C_PURPLE}--- 🦅 Installing Websockets Proxy ---${C_RESET}"
     
     if [ -f "$FALCONPROXY_SERVICE_FILE" ]; then
-        echo -e "\n${C_YELLOW}ℹ️ 404 Proxy is already installed.${C_RESET}"
+        echo -e "\n${C_YELLOW}ℹ️ Websockets Proxy is already installed.${C_RESET}"
         if [ -f "$FALCONPROXY_CONFIG_FILE" ]; then
             source "$FALCONPROXY_CONFIG_FILE"
             echo -e "   It is configured to run on port(s): ${C_YELLOW}$PORTS${C_RESET}"

@@ -3528,27 +3528,40 @@ main_menu() {
         
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}👤 USER MANAGEMENT ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "1" "✨ Create New User" "6" "✏️  Edit User Details"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "2" "🗑️  Delete User" "7" "📋 List Managed Users"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "3" "🔄 Renew User Account" "8" "📱 Generate Client Config"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "4" "🔒 Lock User Account" "9" "⏱️  Create Trial Account"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "5" "🔓 Unlock User Account" "10" "📊 View User Bandwidth"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "11" "👥 Bulk Create Users"
         
+        # Column formatting using printf for perfect alignment
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "1" "✨ Create New User"        "6" "✏️  Edit User Details"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "2" "🗑️  Delete User"          "7" "📋 List Managed Users"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "3" "🔄 Renew User Account"    "8" "📱 Generate Client Config"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "4" "🔒 Lock User Account"     "9" "⏱️  Create Trial Account"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "5" "🔓 Unlock User Account"   "10" "📊 View User Bandwidth"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "11" "👥 Bulk Create Users"
+
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}🌐 VPN & PROTOCOLS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "12" "🔌 Protocol Manager" "14" "📈 Traffic Monitor (Lite)"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "13" "🔗 DT Proxy Manager" "15" "🚫 Block Torrent (Anti-P2P)"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "12" "🔌 Protocol Manager"      "14" "📈 Traffic Monitor (Lite)"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "13" "🔗 DT Proxy Manager"      "15" "🚫 Block Torrent (Anti-P2P)"
 
         echo
         echo -e "   ${C_TITLE}═══════════════[ ${C_BOLD}⚙️ SYSTEM SETTINGS ${C_RESET}${C_TITLE}]═══════════════${C_RESET}"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "16" "☁️  CloudFlare Free Domain" "19" "💾 Backup User Data"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "17" "🎨 SSH Banner Config" "20" "📥 Restore User Data"
-        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28s ${C_CHOICE}[%2s]${C_RESET} %-28s\n" "18" "🔄 Auto-Reboot Task" "21" "🧹 Cleanup Expired Users"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "16" "☁️  CloudFlare/DNS"        "19" "💾 Backup User Data"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "17" "🎨 SSH Banner Config"     "20" "📥 Restore User Data"
+        printf "     ${C_CHOICE}[%2s]${C_RESET} %-28b ${C_CHOICE}[%2s]${C_RESET} %-28b\n" \
+            "18" "🔄 Auto-Reboot Task"      "21" "🧹 Cleanup Expired Users"
 
         echo
         echo -e "   ${C_DANGER}═══════════════════[ ${C_BOLD}🔥 DANGER ZONE ${C_RESET}${C_DANGER}]═══════════════════${C_RESET}"
-        echo -e "     ${C_DANGER}[99]${C_RESET} Uninstall Script             ${C_WARN}[ 0]${C_RESET} Exit"
+        echo -e "     ${C_DANGER}[99]${C_RESET} Uninstall Script               ${C_WARN}[ 0]${C_RESET} Exit"
         echo
         read -p "$(echo -e ${C_PROMPT}"👉 Select an option: "${C_RESET})" choice
         case $choice in
@@ -3563,19 +3576,16 @@ main_menu() {
             9) create_trial_account; press_enter ;;
             10) view_user_bandwidth; press_enter ;;
             11) bulk_create_users; press_enter ;;
-            
             12) protocol_menu ;;
             13) dt_proxy_menu ;;
             14) traffic_monitor_menu ;;
             15) torrent_block_menu ;;
-            
             16) dns_menu; press_enter ;;
             17) ssh_banner_menu ;;
             18) auto_reboot_menu ;;
             19) backup_user_data; press_enter ;;
             20) restore_user_data; press_enter ;;
             21) cleanup_expired; press_enter ;;
-            
             99) uninstall_script ;;
             0) exit 0 ;;
             *) invalid_option ;;

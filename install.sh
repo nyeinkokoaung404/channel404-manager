@@ -6,7 +6,7 @@ set -u
 REPO="nyeinkokoaung404/channel404-manager"
 APP_FILE="channel404-manager.run"
 APP_URL="${C404_APP_URL:-https://raw.githubusercontent.com/$REPO/main/$APP_FILE}"
-APP_SHA256="648371da69147a98182a760294eca8a43882bffc0d333b24c273d10f4b6b62b7"
+APP_SHA256="935ea2bc13ec376307e93ceae4331edce220a077d20c45f7215c11b9801f43bc"
 MENU_BIN="${MENU_BIN:-/usr/local/bin/menu}"
 
 fail() { echo "❌ $*" >&2; exit 1; }

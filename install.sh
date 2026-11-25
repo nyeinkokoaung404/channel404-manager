@@ -1,10 +1,29 @@
 #!/bin/bash
-# Channel404 Manager
+# Channel404 Manager — binary installer (Go build, v1.0.0+)
 # Copyright (C) t.me/nkka404
+#
+# Downloads the prebuilt static binary for this machine's arch from the
+# GitHub release, verifies its SHA-256 against the published checksum,
+# installs it as /usr/local/bin/menu, then runs first-time setup.
+# Replaces the old makeself .run installer; the installed path users
+# already type (`menu`) is unchanged.
+#
+# Overrides (for testing / custom releases):
+#   C404_APP_URL       Full URL of the binary to download.
+#   C404_RELEASE_BASE  Base URL of the release (default: GitHub release
+#                      download URL for TAG below). APP_URL defaults to
+#                      $C404_RELEASE_BASE/channel404-linux-<arch>.
+#   C404_SHA256SUMS_URL  URL of the published SHA256SUMS file.
+#   C404_APP_SHA256    Expected SHA-256 of the binary (overrides the
+#                      SHA256SUMS lookup).
+#   C404_ARCH          Force amd64 or arm64 (testing only).
+#   C404_SETUP         Set to 0 to skip running --install-setup
+#                      (testing only — a real install must run setup).
+#   MENU_BIN           Install destination (default /usr/local/bin/menu).
 set -u
 
 REPO="nyeinkokoaung404/channel404-manager"
-TAG="v1.0.2"
+TAG="v1.0.3"
 RELEASE_BASE="${C404_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}"
 MENU_BIN="${MENU_BIN:-/usr/local/bin/menu}"
 

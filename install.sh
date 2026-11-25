@@ -23,7 +23,7 @@
 set -u
 
 REPO="nyeinkokoaung404/channel404-manager"
-TAG="v1.0.1"
+TAG="v1.0.2"
 RELEASE_BASE="${C404_RELEASE_BASE:-https://github.com/$REPO/releases/download/$TAG}"
 MENU_BIN="${MENU_BIN:-/usr/local/bin/menu}"
 
